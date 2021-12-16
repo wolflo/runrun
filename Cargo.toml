@@ -1,0 +1,10 @@
+[package]
+name = "runrun"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+linkme = "0.2.7"
+futures = "0.3.15"
+anyhow = "1.0.51"
+async-trait = "0.1.52"
