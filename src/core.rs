@@ -4,7 +4,16 @@ use futures::future::Future;
 
 pub type AsyncRes<R> = std::pin::Pin<Box<dyn Future<Output = R> + Send>>;
 pub type Act<T> = fn(T) -> AsyncRes<Result<()>>;
-pub type Move<B, C> = fn(B, &dyn FnOnce(C) -> Box<dyn Runner<C>>) -> AsyncRes<Result<()>>;
+pub type Move<B> = fn(B, Builder);
+
+
+pub trait ActSet {
+    type Ctx: Ctx;
+    fn acts(&self) -> &'static [Act<Self::Ctx>] {
+        &[]
+    }
+    fn spurs(&self) -> &'static [Move<Self::Ctx>] { &[] }
+}
 
 #[async_trait]
 pub trait Ctx: Clone + Send + Sync {
@@ -16,8 +25,7 @@ pub trait Ctx: Clone + Send + Sync {
 #[async_trait]
 pub trait Runner<C: Ctx> {
     async fn run(&self, ctx: C, acts: &[Act<C>]) -> Result<()>;
-    // TODO: means that every Runner will need a reference to a driver?
-    async fn drive(&self, ctx: C) -> Result<()>;
+    // fn new(self, ctx: C) -> &'static dyn Runner<C>;
 }
 // Runner<B> -> C -> Runner<C>
 pub trait RunnerBuilder {
@@ -26,41 +34,80 @@ pub trait RunnerBuilder {
     fn build<B, C>(&mut self, prev: &Self::Runner<B>, ctx: C) -> Self::Runner<C>
     where
         B: Ctx,
-        C: Ctx;
+        C: Ctx<Base = B>;
 }
 
-// f applied to C gives us the runner to dispatch
-pub async fn runrun<B, C, F>(base: B, f: F) -> Result<()>
-where
-    C: Ctx<Base = B>,
-    F: FnOnce(C) -> Box<dyn Runner<C>>,
-{
-    let ctx = C::create(base).await?;
-    let runner = f(ctx.clone());
-    let acts = &[];
-    runner.run(ctx.clone(), acts).await?;
-    runner.drive(ctx).await?;
-    Ok(())
+pub struct NullRunner;
+pub struct NullRunnerBuilder;
+#[async_trait]
+impl<C: Ctx> Runner<C> for NullRunner { async fn run(&self, ctx: C, acts: &[Act<C>]) -> Result<()> { todo!() }}
+impl RunnerBuilder for NullRunnerBuilder {
+    type Runner<T: Ctx> = NullRunner;
+    fn build<B, C>(&mut self, prev: &Self::Runner<B>, ctx: C) -> Self::Runner<C>
+    where
+        B: Ctx,
+        C: Ctx<Base = B>
+    {
+        NullRunner
+    }
 }
 
 // Driver controls transitions between contexts and dispatches Runners
-struct Driver<RB> {
+struct DriverStruct<RB> {
     builder: RB,
 }
-impl<RB: RunnerBuilder> Driver<RB> {
-    async fn drive<B, C>(&mut self, runner: &RB::Runner<B>, ctx: B, moves: &[Move<B, C>])
+impl<RB: RunnerBuilder> DriverStruct<RB> {
+    async fn drive<B, C>(&mut self, runner: &RB::Runner<B>, ctx: B, moves: &[Move<B>])
     where
-        B: Ctx + Clone + Send + Sync,
-        C: Ctx<Base = B>,
+        B: Ctx + Clone + Send + Sync + ActSet + 'static,
+        C: Ctx<Base = B> + ActSet<Ctx=C> + 'static,
     {
-        for m in moves {
-            // want fn(prev_runner, ctx) -> Runner<ctx>
-            // need to partially apply to fn(ctx) -> Runner<ctx>
-            let partial = &|ctx| Box::new(self.builder.build(&runner, ctx)) as Box<dyn Runner<C>>;
-            m(ctx.clone(), partial);
-        }
     }
 }
+// need to take in a ctx and do all dispatch for it
+impl<C: Ctx, RB: RunnerBuilder> FnOnce<(C,)> for DriverStruct<RB> {
+    type Output = ();
+    extern "rust-call" fn call_once(self, ctx: (C,)) -> Self::Output {
+    }
+}
+
+// What I want to pass in to runrun
+// https://stackoverflow.com/questions/37606035/pass-generic-function-as-argument
+pub fn passmein<C: Ctx>() {}
+pub struct Builder;
+pub trait Zoo {}
+impl Builder {
+    // need to be able to set one generic type before passing in and one on build
+    pub fn build<C: Ctx>(&self) -> &dyn FnOnce(C) {
+        // fn built<C: Ctx>(ctx: C) {
+        // }
+        // built
+        &DriverStruct { builder: NullRunnerBuilder }
+    }
+}
+
+
+// If we can somehow make something with the type signature fn() that
+// takes the destination Ctx as a generic and already knows about
+// the driver, that's what we need.
+struct Foo<T>(T);
+impl<T> FnOnce<()> for Foo<T> {
+    type Output = ();
+    extern "rust-call" fn call_once(self, args: ()) -> Self::Output {}
+}
+
+pub async fn runrun<B, C>(base: B, builder: Builder) -> Result<()>
+where
+    C: Ctx<Base = B>,
+{
+    // let ctx = C::create(base).await?;
+    // f: fn(C). So this allows us to create a fn which takes in a C without
+    // polluting the type signature of runrun
+    let f = builder.build::<C>();
+    // driver(ctx);
+    Ok(())
+}
+
 
 #[cfg(test)]
 mod tests {
