@@ -3,7 +3,6 @@ use async_trait::async_trait;
 use futures::future::Future;
 use std::marker::PhantomData;
 
-
 pub struct TNil;
 pub struct TCons<H, T>(PhantomData<(H, T)>);
 
@@ -33,9 +32,18 @@ struct NullCtx;
 type CtxInit = NullCtx;
 
 // take N elements of a TList
-pub trait Take<const N: usize> { type Ret; }
-impl Take<0> for TNil { type Ret = TNil; }
-impl<H, T, const N: usize> Take<N> for TCons<H, T> where T: Take<{N-1}> { type Ret = TCons<H, <T as Take<{N-1}>>::Ret>; }
+pub trait Take<const N: usize> {
+    type Ret;
+}
+impl Take<0> for TNil {
+    type Ret = TNil;
+}
+impl<H, T, const N: usize> Take<N> for TCons<H, T>
+where
+    T: Take<{ N - 1 }>,
+{
+    type Ret = TCons<H, <T as Take<{ N - 1 }>>::Ret>;
+}
 
 pub fn main() {
     // CtxInit::bind();
