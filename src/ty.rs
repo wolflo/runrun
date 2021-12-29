@@ -44,8 +44,6 @@ pub trait Ctx {
 // Get and bind children
 
 pub trait TestSet {
-    type Children;
-    // type TPtrs;
     fn tests() -> &'static [fn(Self)];
 }
 
@@ -94,7 +92,11 @@ type ChildTypes<T> = <T as ChildTypesFn>::Out;
 
 // Type-level cons list
 pub struct TNil;
-pub struct TCons<H, T>(PhantomData<(H, T)>);
+// pub struct TCons<H, T>(PhantomData<(H, T)>);
+pub struct TCons<H, T>(H, T);
+pub trait TList2 {
+    fn map_fn<F>(f: F);
+}
 pub trait TList<B> {
     fn map(base: B);
 }
@@ -103,10 +105,35 @@ impl<B> TList<B> for TNil {
         println!("TNil");
     }
 }
+
+impl<T> RunRunImplementer for T
+where
+    T: BuildMe + TestSet + ChildTypesFn + Clone + 'static,
+    ChildTypes<T>: RunRunImplementer,
+{
+    fn run() {
+        let ctx = Self::build();
+        let tests = Self::tests();
+        for t in tests {
+            t(ctx.clone());
+        }
+        ChildTypes::<Self>::run();
+    }
+    fn run_fn<F>(f: F) where F: FnOnce() {
+        // Self::f();
+    }
+}
+pub trait BuildMe {
+    fn build() -> Self;
+}
+pub trait RunRunImplementer {
+    fn run();
+    fn run_fn<F>(f: F) where F: FnOnce();
+}
 impl<B, H, T: TList<B>> TList<B> for TCons<H, T>
 where
-    H: Ctx<Base = B> + TestSet + Clone + 'static,
-    <H as TestSet>::Children: TList<H>,
+    H: Ctx<Base = B> + TestSet + ChildTypesFn + Clone + 'static,
+    ChildTypes<H>: TList<H>,
     B: Clone,
 {
     fn map(base: B) {
@@ -115,8 +142,93 @@ where
         for t in tests {
             t(ctx.clone());
         }
-        H::Children::map(ctx);
+        ChildTypes::<H>::map(ctx);
+
+        // Func is a Fn (trait) that takes a type (H) and returns an FnOnce
+        // Func<H>();
+        // H::run(base);
         T::map(base);
+    }
+}
+
+pub trait TypeToTypeFn {
+    type Output;
+}
+
+// F takes a type as an arg
+pub trait MapFn<F> {
+    type Output; // An HList of the types of the output
+    fn map() -> Self::Output; // A populated hlist of values
+}
+pub type Map<List, F> = <List as MapFn<F>>::Output;
+// let x: Vec<Map<List, F>> = <List as MapFn<F>>::map();
+pub trait Func {
+    type Apply<T: TIsZeroFn>;
+    fn apply<T: TIsZeroFn>() -> Self::Apply<T>;
+}
+
+pub struct True; pub struct False;
+type TIsZero<N> = <N as TIsZeroFn>::Out;
+pub trait TIsZeroFn {
+    type Out;
+    fn call() -> Self::Out;
+}
+impl TIsZeroFn for Zero {
+    type Out = True;
+    fn call() -> Self::Out { True }
+}
+impl<N> TIsZeroFn for Succ<N> {
+    type Out = False;
+    fn call() -> Self::Out { False }
+}
+pub struct TIsZeroProxy;
+impl Func for TIsZeroProxy {
+    type Apply<T: TIsZeroFn> = TIsZero<T>;
+    fn apply<T: TIsZeroFn>() -> Self::Apply<T> { T::call() }
+}
+
+// Instead of Run<()>, we need F: Func, and F::Apply<>
+impl<F, H, T> MapFn<F> for TCons<H, T>
+where
+    H: BuildMe + TestSet + ChildTypesFn + Clone + 'static + TIsZeroFn,
+    ChildTypes<H>: RunRunImplementer,
+    T: MapFn<F>,
+    // F: Run<()>
+    F: Func,
+{
+    type Output = TCons<<F as Func>::Apply<H>, <T as MapFn<F>>::Output>;
+    // fn map() -> Self::Output { TCons(<H as Run<()>>::call(()), <T as MapFn<F>>::map()) }
+    // fn map() -> Self::Output { TCons(<H as TIsZeroFn>::call(), <T as MapFn<F>>::map()) }
+    fn map() -> Self::Output { TCons(<F as Func>::apply::<H>(), <T as MapFn<F>>::map()) }
+}
+
+// H::map(f);
+
+// Need to map a TypeToValFn over a TList, generating a Vec<Output>
+// This trait represents a fn from a type (Self) and a set of values (Args)
+// to a value of type Output
+// To map a different TypeToValFn, make a new trait with the same fields
+pub trait TypeToValFn<Args> {
+    type Output;
+    fn call(self, args: Args) -> Self::Output;
+}
+pub trait Run<Args> {
+    type Output;
+    fn call(args: Args) -> Self::Output;
+}
+impl<T> Run<()> for T
+where
+    T: BuildMe + TestSet + ChildTypesFn + Clone + 'static,
+    ChildTypes<T>: RunRunImplementer,
+{
+    type Output = ();
+    fn call(args: ()) -> Self::Output {
+        let ctx = Self::build();
+        let tests = Self::tests();
+        for t in tests {
+            t(ctx.clone());
+        }
+        ChildTypes::<Self>::run();
     }
 }
 
@@ -156,22 +268,28 @@ mod tests {
         }
     }
     impl TestSet for Ctx1 {
-        type Children = TCons<Ctx3, TNil>;
         fn tests() -> &'static [fn(Self)] {
             &[|_| println!("Ctx1 test1"), |_| println!("Ctx1 test2")]
         }
     }
     impl TestSet for Ctx2 {
-        type Children = TNil;
         fn tests() -> &'static [fn(Self)] {
             &[|_| println!("Ctx2 test1"), |_| println!("Ctx2 test2")]
         }
     }
     impl TestSet for Ctx3 {
-        type Children = TNil;
         fn tests() -> &'static [fn(Self)] {
             &[|_| println!("Ctx3 test1"), |_| println!("Ctx3 test2")]
         }
+    }
+    impl ChildTypesFn for Ctx1 {
+        type Out = TCons<Ctx3, TNil>;
+    }
+    impl ChildTypesFn for Ctx2 {
+        type Out = TNil;
+    }
+    impl ChildTypesFn for Ctx3 {
+        type Out = TNil;
     }
 
     #[test]
