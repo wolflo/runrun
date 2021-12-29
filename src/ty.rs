@@ -152,21 +152,25 @@ where
 }
 
 pub trait TypeToTypeFn {
-    type Output;
+    type Out;
 }
 
 // F takes a type as an arg
 pub trait MapFn<F> {
-    type Output; // An HList of the types of the output
-    fn map() -> Self::Output; // A populated hlist of values
+    type Out; // An HList of the types of the output
+    fn map() -> Self::Out; // A populated hlist of values
 }
-pub type Map<List, F> = <List as MapFn<F>>::Output;
 // let x: Vec<Map<List, F>> = <List as MapFn<F>>::map();
+// If specialization were more advanced (specifically, if default associated
+// types were not treated as opaque types), we could use GATs to allow different
+// return types for the same Func applied to different input types
 pub trait Func {
-    type Apply<T: TIsZeroFn>;
-    fn apply<T: TIsZeroFn>() -> Self::Apply<T>;
+    type Out;
+    fn apply<H>() -> Self::Out;
 }
 
+// We don't actually need fns that return different types
+// depending on the input type.
 pub struct True; pub struct False;
 type TIsZero<N> = <N as TIsZeroFn>::Out;
 pub trait TIsZeroFn {
@@ -181,26 +185,54 @@ impl<N> TIsZeroFn for Succ<N> {
     type Out = False;
     fn call() -> Self::Out { False }
 }
-pub struct TIsZeroProxy;
-impl Func for TIsZeroProxy {
-    type Apply<T: TIsZeroFn> = TIsZero<T>;
-    fn apply<T: TIsZeroFn>() -> Self::Apply<T> { T::call() }
+// struct TIsZeroProxy;
+// impl Func<()> for TIsZeroProxy {
+//     // type Apply = <Self as TIsZeroFn>::Out;
+//     fn apply() -> () { T::call() }
+// }
+struct NullFn;
+impl Func for NullFn {
+    type Out = ();
+    fn apply<H>() -> Self::Out { println!("foo") }
 }
+
+// pub trait TIsNonZeroFn {
+//     type Out;
+//     fn call() -> Self::Out;
+// }
+// impl<T> Func for T where T: TIsNonZeroFn {
+//     type Apply = <T as TIsNonZeroFn>::Out;
+//     fn apply() -> Self::Apply { T::call() }
+// }
+
+// This won't work bc specialization of associated types are treated as opaque types
+// struct Error;
+// impl<T> TIsZeroFn for T {
+//     default type Out = Error;
+//     default fn call() -> Self::Out { Error }
+// }
 
 // Instead of Run<()>, we need F: Func, and F::Apply<>
 impl<F, H, T> MapFn<F> for TCons<H, T>
 where
-    H: BuildMe + TestSet + ChildTypesFn + Clone + 'static + TIsZeroFn,
-    ChildTypes<H>: RunRunImplementer,
     T: MapFn<F>,
     // F: Run<()>
     F: Func,
 {
-    type Output = TCons<<F as Func>::Apply<H>, <T as MapFn<F>>::Output>;
-    // fn map() -> Self::Output { TCons(<H as Run<()>>::call(()), <T as MapFn<F>>::map()) }
-    // fn map() -> Self::Output { TCons(<H as TIsZeroFn>::call(), <T as MapFn<F>>::map()) }
-    fn map() -> Self::Output { TCons(<F as Func>::apply::<H>(), <T as MapFn<F>>::map()) }
+    // type Out = TCons<<F as Func>::Out, <T as MapFn<F>>::Out>;
+    type Out = TCons<Apply<F>, Map<F, T>>;
+    // type Out = TCons<<F as Func>::Apply, <T as MapFn<F>>::Out>;
+    // fn map() -> Self::Out { TCons(<H as Run<()>>::call(()), <T as MapFn<F>>::map()) }
+    // fn map() -> Self::Out { TCons(<H as TIsZeroFn>::call(), <T as MapFn<F>>::map()) }
+    fn map() -> Self::Out { TCons(<F as Func>::apply::<H>(), <T as MapFn<F>>::map()) }
 }
+impl<F: Func> MapFn<F> for TNil {
+    type Out = TNil;
+    fn map() -> Self::Out { TNil }
+}
+type Map<F, Lst> = <Lst as MapFn<F>>::Out;
+type Apply<F> = <F as Func>::Out;
+
 
 // H::map(f);
 
@@ -209,20 +241,20 @@ where
 // to a value of type Output
 // To map a different TypeToValFn, make a new trait with the same fields
 pub trait TypeToValFn<Args> {
-    type Output;
-    fn call(self, args: Args) -> Self::Output;
+    type Out;
+    fn call(self, args: Args) -> Self::Out;
 }
 pub trait Run<Args> {
-    type Output;
-    fn call(args: Args) -> Self::Output;
+    type Out;
+    fn call(args: Args) -> Self::Out;
 }
 impl<T> Run<()> for T
 where
     T: BuildMe + TestSet + ChildTypesFn + Clone + 'static,
     ChildTypes<T>: RunRunImplementer,
 {
-    type Output = ();
-    fn call(args: ()) -> Self::Output {
+    type Out = ();
+    fn call(args: ()) -> Self::Out {
         let ctx = Self::build();
         let tests = Self::tests();
         for t in tests {
@@ -294,6 +326,7 @@ mod tests {
 
     #[test]
     fn test() {
-        Lst::map(NullCtx);
+        // Lst::map(NullCtx);
+        <Lst as MapFn<NullFn>>::map();
     }
 }
