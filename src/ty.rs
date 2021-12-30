@@ -96,7 +96,7 @@ pub trait Func<T, Args> {
 // types were not treated as opaque types), we could use GATs to allow different
 // return types for the same Func applied to different input types.
 type Map<F, Args, Lst> = <Lst as MapFn<F, Args>>::Out;
-async fn tmap<F, Args, Lst>(f: &mut F, args: Args) -> Map<F, Args, Lst>
+pub async fn tmap<F, Args, Lst>(f: &mut F, args: Args) -> Map<F, Args, Lst>
 where
     Lst: MapFn<F, Args>,
 {
