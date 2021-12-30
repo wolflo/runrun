@@ -3,4 +3,5 @@
 #![allow(unused_imports)]
 
 pub mod core;
+pub mod hooks;
 mod ty;
