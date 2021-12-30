@@ -8,8 +8,8 @@ struct Succ<N>(PhantomData<N>);
 type One = Succ<Zero>;
 
 // Type-level cons list
-struct TNil;
-struct TCons<H, T> {
+pub struct TNil;
+pub struct TCons<H, T> {
     head: H,
     tail: T,
 }
@@ -22,7 +22,7 @@ pub trait ChildTypesFn {
 }
 
 // Any element of a TList (not TNil). For distinguishing base case trait impls.
-trait Elem {}
+pub trait Elem {}
 impl<H, T: Elem> Elem for TCons<H, T> {}
 impl<H> Elem for TCons<H, TNil> {}
 
@@ -37,7 +37,7 @@ impl<N> PredFn for Succ<N> {
 
 // Get first element of a TList. Undefined for an empty TList (TNil)
 type Head<T> = <T as HeadFn>::Out;
-trait HeadFn {
+pub trait HeadFn {
     type Out;
     fn head(self) -> Self::Out;
 }

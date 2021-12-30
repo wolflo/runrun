@@ -6,7 +6,7 @@ use crate::core::Runner;
 #[async_trait]
 pub trait Hooks: Clone + Send + Sync {
     type Base;
-    fn new(base: &Self::Base) -> Self;
+    fn new(base: Self::Base) -> Self;
     async fn before(&mut self) -> Result<()> {
         Ok(())
     }
@@ -28,7 +28,7 @@ pub struct HookRunner<H> {
 impl<H: Hooks> Runner for HookRunner<H> {
     type Out = Result<()>;
     type Base = H::Base;
-    fn new(base: &Self::Base) -> Self {
+    fn new(base: Self::Base) -> Self {
         let hooks = H::new(base);
         Self { hooks }
     }

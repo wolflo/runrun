@@ -8,7 +8,7 @@ use crate::ty::{tmap, ChildTypes, ChildTypesFn, Func, MapFn};
 pub trait Runner {
     type Out;
     type Base;
-    fn new(base: &Self::Base) -> Self;
+    fn new(base: Self::Base) -> Self;
     async fn run<T>(&mut self, ctx: &T, tests: &'static [fn(T)]) -> Self::Out
     where
         T: Sync + Clone;
@@ -30,7 +30,7 @@ where
     ChildTypes<C>: MapFn<Driver<R>, C>,
 {
     let init_ctx = C::build(()).await;
-    let runner = R::new(&init_ctx);
+    let runner = R::new(init_ctx.clone());
     let mut driver = Driver::new(runner);
     driver.run_ctx(init_ctx).await;
 }
@@ -68,16 +68,5 @@ where
         let ctx = T::build(base).await;
         self.run_ctx(ctx).await;
         Arc::new(Ok(()))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #![allow(unused_imports)]
-    use super::*;
-
-    #[test]
-    fn test() {
-        // start::<HookRunner, INIT_CTX>().await;
     }
 }
