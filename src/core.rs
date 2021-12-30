@@ -33,10 +33,8 @@ where
     C: Ctx<Base = Args> + TestSet + ChildTypesFn + Send + Sync + Clone + 'static,
     R: Runner<Base = C, Out = Result<()>> + Send + Sync,
     ChildTypes<C>: MapFn<Driver<R>, C>,
-    C: DebugTrait,
 {
     let init_ctx = C::build(args).await;
-    init_ctx.debug().await;
     let runner = R::new(init_ctx.clone());
     let mut driver = Driver::new(runner);
     driver.run_ctx(init_ctx).await;

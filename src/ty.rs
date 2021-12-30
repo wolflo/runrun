@@ -15,7 +15,7 @@ pub struct TCons<H, T> {
 }
 
 // A mapping from type -> TList of descendant types. Specifically, this is
-// used to define the Ctxs that can be built from each Ctx.
+// used to define the child Ctxs that can be built from each Ctx.
 pub type ChildTypes<T> = <T as ChildTypesFn>::Out;
 pub trait ChildTypesFn {
     type Out;

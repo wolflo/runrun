@@ -8,6 +8,10 @@ use std::{marker::PhantomData, sync::Arc};
 
 use crate::hooks::*;
 
+// Convenience type for Eth DevRpc hooks (snapshot and reset between tests)
+pub type EthRunner<Ctx> =
+    HookRunner<DevRpcHooks<Arc<DevRpcMiddleware<<Ctx as DevRpcCtx>::Inner>>, Ctx>>;
+
 // Should be implemented by the starting state to allow the runner to be built in start()
 pub trait DevRpcCtx {
     type Inner: Middleware;
