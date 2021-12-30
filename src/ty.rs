@@ -71,10 +71,14 @@ type TakeDrop<N, T> = (Take<N, T>, Drop<N, T>);
 pub trait TakeFn<N> {
     type Out;
     type Rest;
+    fn take(self) -> Self::Out;
 }
 impl<T> TakeFn<Zero> for T {
     type Out = TNil;
     type Rest = T;
+    fn take(self) -> Self::Out {
+        TNil
+    }
 }
 impl<H, T, N> TakeFn<N> for TCons<H, T>
 where
@@ -83,6 +87,34 @@ where
 {
     type Out = TCons<H, <T as TakeFn<Pred<N>>>::Out>;
     type Rest = <T as TakeFn<Pred<N>>>::Rest;
+    fn take(self) -> Self::Out {
+        TCons {
+            head: self.head,
+            tail: self.tail.take(),
+        }
+    }
+}
+// impl<H, T> TakeFn<Zero> for TCons<H, T> {
+//     type Out = TNil;
+//     type Rest = TCons<H, T>;
+// }
+// impl<N> TakeFn<N> for TNil
+// {
+//     type Out = TNil;
+//     type Rest = TNil;
+// }
+
+// Get first element of a TList
+type Head<T> = <T as HeadFn>::Out;
+pub trait HeadFn {
+    type Out;
+    fn head(self) -> Self::Out;
+}
+impl<H, T> HeadFn for TCons<H, T> {
+    type Out = H;
+    fn head(self) -> Self::Out {
+        self.head
+    }
 }
 
 pub trait ChildTypesFn {
@@ -93,7 +125,10 @@ type ChildTypes<T> = <T as ChildTypesFn>::Out;
 // Type-level cons list
 pub struct TNil;
 // pub struct TCons<H, T>(PhantomData<(H, T)>);
-pub struct TCons<H, T>(H, T);
+pub struct TCons<H, T> {
+    head: H,
+    tail: T,
+}
 pub trait TList2 {
     fn map_fn<F>(f: F);
 }
@@ -119,7 +154,10 @@ where
         }
         ChildTypes::<Self>::run();
     }
-    fn run_fn<F>(f: F) where F: FnOnce() {
+    fn run_fn<F>(f: F)
+    where
+        F: FnOnce(),
+    {
         // Self::f();
     }
 }
@@ -128,7 +166,9 @@ pub trait BuildMe {
 }
 pub trait RunRunImplementer {
     fn run();
-    fn run_fn<F>(f: F) where F: FnOnce();
+    fn run_fn<F>(f: F)
+    where
+        F: FnOnce();
 }
 impl<B, H, T: TList<B>> TList<B> for TCons<H, T>
 where
@@ -160,7 +200,9 @@ pub trait MapFn<F> {
     type Out; // An HList of the types of the output
     fn map() -> Self::Out; // A populated hlist of values
 }
-// let x: Vec<Map<List, F>> = <List as MapFn<F>>::map();
+
+// Func is essentially FnOnce as an associated function (without a self param)
+// with an added generic arg to apply() / call_once().
 // If specialization were more advanced (specifically, if default associated
 // types were not treated as opaque types), we could use GATs to allow different
 // return types for the same Func applied to different input types
@@ -168,49 +210,6 @@ pub trait Func {
     type Out;
     fn apply<H>() -> Self::Out;
 }
-
-// We don't actually need fns that return different types
-// depending on the input type.
-pub struct True; pub struct False;
-type TIsZero<N> = <N as TIsZeroFn>::Out;
-pub trait TIsZeroFn {
-    type Out;
-    fn call() -> Self::Out;
-}
-impl TIsZeroFn for Zero {
-    type Out = True;
-    fn call() -> Self::Out { True }
-}
-impl<N> TIsZeroFn for Succ<N> {
-    type Out = False;
-    fn call() -> Self::Out { False }
-}
-// struct TIsZeroProxy;
-// impl Func<()> for TIsZeroProxy {
-//     // type Apply = <Self as TIsZeroFn>::Out;
-//     fn apply() -> () { T::call() }
-// }
-struct NullFn;
-impl Func for NullFn {
-    type Out = ();
-    fn apply<H>() -> Self::Out { println!("foo") }
-}
-
-// pub trait TIsNonZeroFn {
-//     type Out;
-//     fn call() -> Self::Out;
-// }
-// impl<T> Func for T where T: TIsNonZeroFn {
-//     type Apply = <T as TIsNonZeroFn>::Out;
-//     fn apply() -> Self::Apply { T::call() }
-// }
-
-// This won't work bc specialization of associated types are treated as opaque types
-// struct Error;
-// impl<T> TIsZeroFn for T {
-//     default type Out = Error;
-//     default fn call() -> Self::Out { Error }
-// }
 
 // Instead of Run<()>, we need F: Func, and F::Apply<>
 impl<F, H, T> MapFn<F> for TCons<H, T>
@@ -224,15 +223,54 @@ where
     // type Out = TCons<<F as Func>::Apply, <T as MapFn<F>>::Out>;
     // fn map() -> Self::Out { TCons(<H as Run<()>>::call(()), <T as MapFn<F>>::map()) }
     // fn map() -> Self::Out { TCons(<H as TIsZeroFn>::call(), <T as MapFn<F>>::map()) }
-    fn map() -> Self::Out { TCons(<F as Func>::apply::<H>(), <T as MapFn<F>>::map()) }
+    fn map() -> Self::Out {
+        TCons {
+            head: <F as Func>::apply::<H>(),
+            tail: <T as MapFn<F>>::map(),
+        }
+    }
 }
 impl<F: Func> MapFn<F> for TNil {
     type Out = TNil;
-    fn map() -> Self::Out { TNil }
+    fn map() -> Self::Out {
+        TNil
+    }
 }
 type Map<F, Lst> = <Lst as MapFn<F>>::Out;
 type Apply<F> = <F as Func>::Out;
 
+pub trait ToVec<T> {
+    fn to_vec(&mut self) -> Vec<T>;
+}
+impl<T, TS> ToVec<T> for TCons<T, TS>
+where
+    TS: ToVec<T>,
+    T: Clone,
+{
+    fn to_vec(&mut self) -> Vec<T> {
+        let mut v = vec![self.head.clone()];
+        v.extend(self.tail.to_vec());
+        v
+    }
+}
+impl<T> ToVec<T> for TNil {
+    fn to_vec(&mut self) -> Vec<T> {
+        vec![]
+    }
+}
+
+// Implemented for any list containing only elements of the same type
+pub trait Mono {}
+impl Mono for TNil {}
+impl<H> Mono for TCons<H, TNil> {}
+impl<H, T> Mono for TCons<H, T>
+where
+    (H, Head<T>): TEq,
+    T: HeadFn + Mono,
+{
+}
+pub trait TEq {}
+impl<T> TEq for (T, T) {}
 
 // H::map(f);
 
@@ -324,9 +362,54 @@ mod tests {
         type Out = TNil;
     }
 
+    fn foo<T: Mono>() {}
+
     #[test]
     fn test() {
         // Lst::map(NullCtx);
-        <Lst as MapFn<NullFn>>::map();
+        type L = TCons<u8, TCons<u16, TNil>>;
+        // foo::<L>();
+        let x = <Lst as MapFn<NullFn>>::map().to_vec();
+        let x = TCons { head: 1, tail: TCons { head: 'c', tail: TNil }};
+        // let x = <Lst as MapFn<NullFn>>::map();
+        // let x = TakeFn::<Succ<One>>::take(x);
     }
 }
+
+// We don't actually need fns that return different types
+// depending on the input type.
+type TIsZero<N> = <N as TIsZeroFn>::Out;
+pub trait TIsZeroFn {
+    type Out;
+    fn call() -> Self::Out;
+}
+impl TIsZeroFn for Zero {
+    type Out = True;
+    fn call() -> Self::Out {
+        True
+    }
+}
+impl<N> TIsZeroFn for Succ<N> {
+    type Out = False;
+    fn call() -> Self::Out {
+        False
+    }
+}
+struct NullFn;
+impl Func for NullFn {
+    type Out = ();
+    fn apply<H>() -> Self::Out {
+        println!("foo")
+    }
+}
+pub struct True;
+pub struct False;
+
+// impl<H, T> Iterator for TCons<H, T> where H: Clone, T: HeadFn<Out = H> + DropFn<One> + Clone {
+//     type Item = H;
+//     fn next(&mut self) -> Option<Self::Item> {
+//         self.head = self.tail.clone().head();
+//         self.tail = self.tail.drop(1);
+//         Some(self.head.clone())
+//     }
+// }
