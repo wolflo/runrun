@@ -118,7 +118,7 @@ type ChildTypes<T> = <T as ChildTypesFn>::Out;
 
 
 // Func is essentially FnOnce as an associated function (without a self param)
-// with an added generic arg to apply() / call_once().
+// and an added generic arg that is not a fn parameter. apply() stands in for call_once().
 // If specialization were more advanced (specifically, if default associated
 // types were not treated as opaque types), we could use GATs to allow different
 // return types for the same Func applied to different input types
@@ -129,51 +129,47 @@ pub trait Func<T> {
 }
 
 type Map<F, Lst> = <Lst as MapFn<F>>::Out;
+fn tmap<F, Lst>() -> Map<F, Lst> where Lst: MapFn<F> {
+    <Lst as MapFn<F>>::map()
+}
 pub trait MapFn<F> {
     type Out; // An HList of the types of the output
     fn map() -> Self::Out; // A populated hlist of values
 }
 impl<F, H, T> MapFn<F> for TCons<H, T>
 where
-    T: MapFn<F>,
-    F: Func<H> + Func<T>,
+    T: MapFn<F> + Elem + HeadFn,
+    F: Func<H> + Func<Head<T>>,
 {
     type Out = TCons<Apply<F, H>, Map<F, T>>;
     fn map() -> Self::Out {
-        // I want to map f across a TList where f is an associated fn
-        // implemented by all types in the TList
-        // Self::F
         TCons {
             head: <F as Func<H>>::apply(),
             tail: <T as MapFn<F>>::map(),
         }
     }
 }
-// impl<F, H> MapFn<F> for TCons<H, TNil>
-// where
-//     F: Func<H>,
-// {
-//     type Out = TCons<Apply<F, H>, TNil>;
-//     fn map() -> Self::Out {
-//         TCons {
-//             head: <F as Func<H>>::apply(),
-//             tail: TNil,
-//         }
-//     }
-// }
-impl<F> !MapFn<F> for TNil {}
-// pub auto trait NotNil {}
-// impl !NotNil for TNil {}
-
-
-pub struct GNil<T>(PhantomData<T>);
-impl<F: Func<T>, T> MapFn<F> for GNil<T> {
-    type Out = TNil;
+impl<F, H> MapFn<F> for TCons<H, TNil>
+where
+    F: Func<H>,
+{
+    type Out = TCons<Apply<F, H>, TNil>;
     fn map() -> Self::Out {
-        TNil
+        TCons {
+            head: <F as Func<H>>::apply(),
+            tail: TNil,
+        }
     }
 }
+impl<F> MapFn<F> for TNil {
+    type Out = TNil;
+    fn map() -> Self::Out { TNil }
+}
+pub trait Elem {}
+impl<H, T: Elem> Elem for TCons<H, T> {}
+impl<H> Elem for TCons<H, TNil> {}
 
+// Turn a monomorphic TList into a vector
 pub trait ToVec<T> {
     fn to_vec(&mut self) -> Vec<T>;
 }
@@ -203,19 +199,6 @@ impl<T: BuildMe> Func<T> for Run {
     }
 }
 
-pub trait Builder<T> {
-    fn build(&self) -> fn(T);
-}
-
-pub trait Trait {}
-impl Trait for usize {} impl Trait for u8 {}
-struct Build;
-impl<T: Trait> Builder<T> for Build {
-    fn build(&self) -> fn(T) {
-        fn inner<U>(x: U) { () }
-        inner
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -229,6 +212,10 @@ mod tests {
     struct Ctx2;
     #[derive(Clone)]
     struct Ctx3;
+    impl BuildMe for Ctx1 { fn build() -> Self { Ctx1 } }
+    impl BuildMe for Ctx2 { fn build() -> Self { Ctx2 } }
+    impl BuildMe for Ctx3 { fn build() -> Self { Ctx3 } }
+
     impl ChildTypesFn for NullCtx {
         type Out = TCons<Ctx1, TCons<Ctx2, TNil>>;
     }
@@ -277,19 +264,19 @@ mod tests {
         type Out = TNil;
     }
 
+
     #[test]
     fn test() {
         type L = TCons<u8, TCons<u16, TNil>>;
-        // let x = <Lst as MapFn<Run>>::map().to_vec();
-        let x = TCons { head: 1, tail: TCons { head: 'c', tail: TNil }};
-        // let x = <Lst as MapFn<NullFn>>::map();
-        // let x = TakeFn::<Succ<One>>::take(x);
-
-        let b = Build;
-        let f: fn(u8) = b.build();
-        let g: fn(usize) = b.build();
+        // let run_mapped = tmap::<Run, Lst>().to_vec();
+        // dbg!(run_mapped);
+        let other_mapped = <L as MapFn<OtherFn>>::map().to_vec();
+        dbg!(other_mapped);
     }
 }
+
+/////
+
 
 // We don't actually need fns that return different types
 // depending on the input type.
@@ -387,6 +374,38 @@ where
         // Func<H>();
         // H::run(base);
         T::map(base);
+    }
+}
+
+pub struct GNil<T>(PhantomData<T>);
+impl<F: Func<T>, T> MapFn<F> for GNil<T> {
+    type Out = TNil;
+    fn map() -> Self::Out {
+        TNil
+    }
+}
+
+// let b = Build;
+// let f: fn(u8) = b.build();
+// let g: fn(usize) = b.build();
+pub trait Builder<T> {
+    fn build(&self) -> fn(T);
+}
+pub trait Trait {}
+impl Trait for usize {} impl Trait for u8 {} impl Trait for u16 {}
+struct Build;
+impl<T: Trait> Builder<T> for Build {
+    fn build(&self) -> fn(T) {
+        fn inner<U>(x: U) { () }
+        inner
+    }
+}
+
+struct OtherFn;
+impl<T: Trait> Func<T> for OtherFn {
+    type Out = ();
+    fn apply() -> Self::Out {
+        ()
     }
 }
 
