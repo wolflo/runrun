@@ -1,7 +1,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
-use crate::core::*;
+use crate::core::Runner;
 
 #[async_trait]
 pub trait Hooks: Clone + Send + Sync {
