@@ -34,18 +34,16 @@ pub struct TCons<H, T> {
 // need a fn (trait) that takes a list of types and a (list of?) function on those types and accumulated the results
 // Runner should be built from initial state that user designates with #[run_state(init)]
 //  - should take only a context and a list of tests -- see proptest lib
-pub trait Runner<T> {
-    fn run(&self, tests: &'static [fn(T)]) -> Result<()>;
-
-    // fn build<B, R: Self<B>>(base: R) -> Self;
-    // fn build<C, R: Runner<C>>(&self, ctx: C) -> R;
-    fn new(ctx: &T) -> Self;
+#[async_trait]
+pub trait Runner {
+    type Out;
+    async fn run<T>(&self, ctx: &T, tests: &'static [fn(T)]) -> Self::Out;
 }
+#[async_trait]
 pub trait Ctx {
     type Base;
-    fn build(base: Self::Base) -> Self;
+    async fn build(base: Self::Base) -> Self;
 }
-
 pub trait TestSet {
     fn tests() -> &'static [fn(Self)];
 }
@@ -116,55 +114,67 @@ pub trait ChildTypesFn {
 }
 type ChildTypes<T> = <T as ChildTypesFn>::Out;
 
-
 // Func is essentially FnOnce as an associated function (without a self param)
 // and an added generic arg that is not a fn parameter. apply() stands in for call_once().
 // If specialization were more advanced (specifically, if default associated
 // types were not treated as opaque types), we could use GATs to allow different
 // return types for the same Func applied to different input types
 type Apply<F, Args, T> = <F as Func<T, Args>>::Out;
+#[async_trait]
 pub trait Func<T, Args> {
     type Out;
-    fn call(args: Args) -> Self::Out;
+    async fn call(&mut self, args: Args) -> Self::Out;
 }
 
 type Map<F, Args, Lst> = <Lst as MapFn<F, Args>>::Out;
-fn tmap<F, Args, Lst>(args: Args) -> Map<F, Args, Lst> where Lst: MapFn<F, Args> {
-    <Lst as MapFn<F, Args>>::map(args)
+async fn tmap<F, Args, Lst>(f: &mut F, args: Args) -> Map<F, Args, Lst>
+where
+    Lst: MapFn<F, Args>,
+{
+    <Lst as MapFn<F, Args>>::map(f, args).await
 }
+#[async_trait]
 pub trait MapFn<F, Args> {
     type Out; // An HList of the types of the output
-    fn map(args: Args) -> Self::Out; // A populated hlist of values
+    async fn map(f: &mut F, args: Args) -> Self::Out; // A populated hlist of values
 }
+#[async_trait]
 impl<F, Args, H, T> MapFn<F, Args> for TCons<H, T>
 where
-    Args: Clone,
     T: MapFn<F, Args> + Elem + HeadFn,
-    F: Func<H, Args> + Func<Head<T>, Args>,
+    F: Func<H, Args> + Func<Head<T>, Args> + Send + Sync,
+    Args: Send + Sync + Clone + 'static,
+    Apply<F, Args, H>: Send,
 {
     type Out = TCons<Apply<F, Args, H>, Map<F, Args, T>>;
-    fn map(args: Args) -> Self::Out {
+    async fn map(f: &mut F, args: Args) -> Self::Out {
         TCons {
-            head: <F as Func<H, Args>>::call(args.clone()),
-            tail: <T as MapFn<F, Args>>::map(args),
+            head: <F as Func<H, Args>>::call(f, args.clone()).await,
+            tail: <T as MapFn<F, Args>>::map(f, args).await,
         }
     }
 }
+#[async_trait]
 impl<F, Args, H> MapFn<F, Args> for TCons<H, TNil>
 where
-    F: Func<H, Args>,
+    F: Func<H, Args> + Send,
+    Args: Send + 'static,
+    Apply<F, Args, H>: Send,
 {
     type Out = TCons<Apply<F, Args, H>, TNil>;
-    fn map(args: Args) -> Self::Out {
+    async fn map(f: &mut F, args: Args) -> Self::Out {
         TCons {
-            head: <F as Func<H, Args>>::call(args),
+            head: <F as Func<H, Args>>::call(f, args).await,
             tail: TNil,
         }
     }
 }
-impl<F, Args> MapFn<F, Args> for TNil {
+#[async_trait]
+impl<F, Args> MapFn<F, Args> for TNil where F: Send, Args: Send + 'static, {
     type Out = TNil;
-    fn map(_: Args) -> Self::Out { TNil }
+    async fn map(_f: &mut F, _args: Args) -> Self::Out {
+        TNil
+    }
 }
 pub trait Elem {}
 impl<H, T: Elem> Elem for TCons<H, T> {}
@@ -191,36 +201,26 @@ impl<T> ToVec<T> for TNil {
     }
 }
 
-// fn tmap_children<F, Args, T>(args: Args) -> Map<F, Args, ChildTypes<T>> where T: ChildTypesFn, ChildTypes<T>: MapFn<F, Args> {
-    // type Children = ChildTypes<T>;
-    // ChildTypes<T>::map(args)
-    // <Children as MapFn<F, Args>>::map(args)
-// }
-fn foo<T>() where T: HeadFn, Head<T>: TestSet + 'static {
-    let _ = Head::<T>::tests();
+struct Driver<R> {
+    runner: R,
 }
-struct Driver;
-impl<T, R, C> Func<T, (R, C)> for Driver
+#[async_trait]
+impl<T, R, C> Func<T, C> for Driver<R>
 where
-    T: Ctx<Base = C> + TestSet + ChildTypesFn + Clone + 'static,
-    R: Runner<C>,
-    C: Ctx + Clone,
-    ChildTypes<T>: MapFn<Self, (R, C)>,
+    T: Ctx<Base = C> + TestSet + ChildTypesFn + Send + Sync + 'static,
+    R: Runner + Send + Sync,
+    C: Ctx + Send + Clone + 'static,
+    ChildTypes<T>: MapFn<Self, T>,
 {
     type Out = Arc<Result<()>>;
-    fn call(args: (R, C)) -> Self::Out {
-        let ctx = T::build(args.1.clone());
+    async fn call(&mut self, base: C) -> Self::Out {
+        let ctx = T::build(base).await;
         let tests = T::tests();
-        // let runner = R::new(&args.1.clone());
-        // runner.run(tests);
-        for t in tests {
-            t(ctx.clone())
-        }
-        ChildTypes::<T>::map(args);
+        self.runner.run(&ctx, tests).await;
+        ChildTypes::<T>::map(self, ctx).await;
         Arc::new(Ok(()))
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -234,30 +234,45 @@ mod tests {
     struct Ctx2;
     #[derive(Clone)]
     struct Ctx3;
-    impl BuildMe for Ctx1 { fn build() -> Self { Ctx1 } }
-    impl BuildMe for Ctx2 { fn build() -> Self { Ctx2 } }
-    impl BuildMe for Ctx3 { fn build() -> Self { Ctx3 } }
+    impl BuildMe for Ctx1 {
+        fn build() -> Self {
+            Ctx1
+        }
+    }
+    impl BuildMe for Ctx2 {
+        fn build() -> Self {
+            Ctx2
+        }
+    }
+    impl BuildMe for Ctx3 {
+        fn build() -> Self {
+            Ctx3
+        }
+    }
 
     impl ChildTypesFn for NullCtx {
         type Out = TCons<Ctx1, TCons<Ctx2, TNil>>;
     }
 
     type Lst = TCons<Ctx1, TCons<Ctx2, TNil>>;
+    #[async_trait]
     impl Ctx for Ctx1 {
         type Base = NullCtx;
-        fn build(base: Self::Base) -> Self {
+        async fn build(base: Self::Base) -> Self {
             Self
         }
     }
+    #[async_trait]
     impl Ctx for Ctx2 {
         type Base = NullCtx;
-        fn build(base: Self::Base) -> Self {
+        async fn build(base: Self::Base) -> Self {
             Self
         }
     }
+    #[async_trait]
     impl Ctx for Ctx3 {
         type Base = Ctx1;
-        fn build(base: Self::Base) -> Self {
+        async fn build(base: Self::Base) -> Self {
             Self
         }
     }
@@ -286,19 +301,17 @@ mod tests {
         type Out = TNil;
     }
 
-
     #[test]
     fn test() {
         type L = TCons<u8, TCons<u16, TNil>>;
         // let run_mapped = tmap::<Run, Lst>().to_vec();
         // dbg!(run_mapped);
-        let other_mapped = <L as MapFn<NullFn, ()>>::map(()).to_vec();
-        dbg!(other_mapped);
+        // let other_mapped = <L as MapFn<NullFn, ()>>::map(()).to_vec();
+        // dbg!(other_mapped);
     }
 }
 
 /////
-
 
 // We don't actually need fns that return different types
 // depending on the input type.
@@ -379,25 +392,25 @@ pub trait RunRunImplementer {
     where
         F: FnOnce();
 }
-impl<B, H, T: TList<B>> TList<B> for TCons<H, T>
-where
-    H: Ctx<Base = B> + TestSet + ChildTypesFn + Clone + 'static,
-    ChildTypes<H>: TList<H>,
-    B: Clone,
-{
-    fn map(base: B) {
-        let ctx = H::build(base.clone());
-        let tests = H::tests();
-        for t in tests {
-            t(ctx.clone());
-        }
-        ChildTypes::<H>::map(ctx);
-        // Func is a Fn (trait) that takes a type (H) and returns an FnOnce
-        // Func<H>();
-        // H::run(base);
-        T::map(base);
-    }
-}
+// impl<B, H, T: TList<B>> TList<B> for TCons<H, T>
+// where
+//     H: Ctx<Base = B> + TestSet + ChildTypesFn + Clone + 'static,
+//     ChildTypes<H>: TList<H>,
+//     B: Clone,
+// {
+//     fn map(base: B) {
+//         let ctx = H::build(base.clone());
+//         let tests = H::tests();
+//         for t in tests {
+//             t(ctx.clone());
+//         }
+//         ChildTypes::<H>::map(ctx);
+//         // Func is a Fn (trait) that takes a type (H) and returns an FnOnce
+//         // Func<H>();
+//         // H::run(base);
+//         T::map(base);
+//     }
+// }
 
 // pub struct GNil<T>(PhantomData<T>);
 // impl<F: Func<T>, T> MapFn<F> for GNil<T> {
@@ -414,23 +427,26 @@ pub trait Builder<T> {
     fn build(&self) -> fn(T);
 }
 pub trait Trait {}
-impl Trait for usize {} impl Trait for u8 {} impl Trait for u16 {}
+impl Trait for usize {}
+impl Trait for u8 {}
+impl Trait for u16 {}
 struct Build;
 impl<T: Trait> Builder<T> for Build {
     fn build(&self) -> fn(T) {
-        fn inner<U>(x: U) { () }
+        fn inner<U>(x: U) {
+            ()
+        }
         inner
     }
 }
 
-struct NullFn;
-impl<T: Trait> Func<T, ()> for NullFn {
-    type Out = ();
-    fn call(_: ()) -> Self::Out {
-        ()
-    }
-}
-
+// struct NullFn;
+// impl<T: Trait> Func<T, ()> for NullFn {
+//     type Out = ();
+//     fn call(_: ()) -> Self::Out {
+//         ()
+//     }
+// }
 
 // impl<H, T> Iterator for TCons<H, T> where H: Clone, T: HeadFn<Out = H> + DropFn<One> + Clone {
 //     type Item = H;
