@@ -24,6 +24,9 @@ pub struct TCons<H, T> {
 // run a particular fixture only once. Could we define fixture fns that do something different (e.g.
 // reset state) when they are called the second time?
 
+// fns from types to values is just parametric polymorphism (generic fns). But we need
+// higher-rank types to be able to pass a polymorphic fn without monomorphizing it.
+
 // Need to make something of kind * -> *, but abstract over arity
 // * -> * -> *
 
@@ -34,8 +37,6 @@ pub struct TCons<H, T> {
 pub trait Runner<T> {
     fn run(&self, ctx: &T, tests: &'static [fn(T)]) -> Result<()>;
 
-    // Do we want to be able to share state across runners? i.e. build from previous runner
-    // Do we want to be able to change the Runner type throughout a test suite?
     // fn build<B, R: Self<B>>(base: R) -> Self;
     // fn build<C, R: Runner<C>>(&self, ctx: C) -> R;
     fn new(ctx: &T) -> Self;
@@ -44,12 +45,6 @@ pub trait Ctx {
     type Base;
     fn build(base: Self::Base) -> Self;
 }
-
-// Need action on binder to:
-// Create state from previous state
-// Build runner
-// Get and run tests
-// Get and bind children
 
 pub trait TestSet {
     fn tests() -> &'static [fn(Self)];
@@ -102,15 +97,6 @@ where
         }
     }
 }
-// impl<H, T> TakeFn<Zero> for TCons<H, T> {
-//     type Out = TNil;
-//     type Rest = TCons<H, T>;
-// }
-// impl<N> TakeFn<N> for TNil
-// {
-//     type Out = TNil;
-//     type Rest = TNil;
-// }
 
 // Get first element of a TList
 type Head<T> = <T as HeadFn>::Out;
@@ -136,10 +122,10 @@ type ChildTypes<T> = <T as ChildTypesFn>::Out;
 // If specialization were more advanced (specifically, if default associated
 // types were not treated as opaque types), we could use GATs to allow different
 // return types for the same Func applied to different input types
-type Apply<F> = <F as Func>::Out;
-pub trait Func {
+type Apply<F, T> = <F as Func<T>>::Out;
+pub trait Func<T> {
     type Out;
-    fn apply<H>() -> Self::Out;
+    fn apply() -> Self::Out;
 }
 
 type Map<F, Lst> = <Lst as MapFn<F>>::Out;
@@ -150,20 +136,38 @@ pub trait MapFn<F> {
 impl<F, H, T> MapFn<F> for TCons<H, T>
 where
     T: MapFn<F>,
-    F: Func,
+    F: Func<H> + Func<T>,
 {
-    type Out = TCons<Apply<F>, Map<F, T>>;
+    type Out = TCons<Apply<F, H>, Map<F, T>>;
     fn map() -> Self::Out {
         // I want to map f across a TList where f is an associated fn
         // implemented by all types in the TList
         // Self::F
         TCons {
-            head: <F as Func>::apply::<H>(),
+            head: <F as Func<H>>::apply(),
             tail: <T as MapFn<F>>::map(),
         }
     }
 }
-impl<F: Func> MapFn<F> for TNil {
+// impl<F, H> MapFn<F> for TCons<H, TNil>
+// where
+//     F: Func<H>,
+// {
+//     type Out = TCons<Apply<F, H>, TNil>;
+//     fn map() -> Self::Out {
+//         TCons {
+//             head: <F as Func<H>>::apply(),
+//             tail: TNil,
+//         }
+//     }
+// }
+impl<F> !MapFn<F> for TNil {}
+// pub auto trait NotNil {}
+// impl !NotNil for TNil {}
+
+
+pub struct GNil<T>(PhantomData<T>);
+impl<F: Func<T>, T> MapFn<F> for GNil<T> {
     type Out = TNil;
     fn map() -> Self::Out {
         TNil
@@ -191,11 +195,25 @@ impl<T> ToVec<T> for TNil {
 }
 
 struct Run;
-impl Func for Run {
+impl<T: BuildMe> Func<T> for Run {
     type Out = Arc<Result<()>>;
-    fn apply<H>() -> Self::Out {
-        // let ctx = H::build();
+    fn apply() -> Self::Out {
+        let ctx = T::build();
         Arc::new(Ok(()))
+    }
+}
+
+pub trait Builder<T> {
+    fn build(&self) -> fn(T);
+}
+
+pub trait Trait {}
+impl Trait for usize {} impl Trait for u8 {}
+struct Build;
+impl<T: Trait> Builder<T> for Build {
+    fn build(&self) -> fn(T) {
+        fn inner<U>(x: U) { () }
+        inner
     }
 }
 
@@ -262,10 +280,14 @@ mod tests {
     #[test]
     fn test() {
         type L = TCons<u8, TCons<u16, TNil>>;
-        let x = <Lst as MapFn<Run>>::map().to_vec();
+        // let x = <Lst as MapFn<Run>>::map().to_vec();
         let x = TCons { head: 1, tail: TCons { head: 'c', tail: TNil }};
         // let x = <Lst as MapFn<NullFn>>::map();
         // let x = TakeFn::<Succ<One>>::take(x);
+
+        let b = Build;
+        let f: fn(u8) = b.build();
+        let g: fn(usize) = b.build();
     }
 }
 
@@ -289,12 +311,12 @@ impl<N> TIsZeroFn for Succ<N> {
     }
 }
 struct NullFn;
-impl Func for NullFn {
-    type Out = ();
-    fn apply<H>() -> Self::Out {
-        println!("foo")
-    }
-}
+// impl Func for NullFn {
+//     type Out = ();
+//     fn apply<H>() -> Self::Out {
+//         println!("foo")
+//     }
+// }
 pub struct True;
 pub struct False;
 
