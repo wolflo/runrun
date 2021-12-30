@@ -8,7 +8,8 @@ linkme = "0.2.7"
 futures = "0.3.15"
 anyhow = "1.0.51"
 async-trait = "0.1.52"
-ethers = { version = "0.6.2", features = ["legacy", "dev-rpc"]}
+ethers = { path = "../ext/ethers-rs/", features = ["legacy", "dev-rpc"] }
+# ethers = { version = "0.6.2", features = ["legacy", "dev-rpc"]}
 
 [dev-dependencies]
 tokio = { version = "1.15.0", features = ["rt", "macros"] }

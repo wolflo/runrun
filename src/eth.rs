@@ -1,6 +1,9 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use ethers::{providers::{Middleware, DevRpcMiddleware}, types::U256};
+use ethers::{
+    providers::{DevRpcMiddleware, Middleware},
+    types::U256,
+};
 use std::{marker::PhantomData, sync::Arc};
 
 use crate::hooks::*;
@@ -28,7 +31,7 @@ where
         Self {
             snap_id: 0usize.into(),
             client: base.client(),
-            phantom: PhantomData
+            phantom: PhantomData,
         }
     }
     async fn before_each(&mut self) -> Result<()> {
@@ -40,4 +43,3 @@ where
         Ok(())
     }
 }
-

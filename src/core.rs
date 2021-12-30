@@ -5,6 +5,11 @@ use std::sync::Arc;
 use crate::ty::{tmap, ChildTypes, ChildTypesFn, Func, MapFn};
 
 #[async_trait]
+pub trait DebugTrait {
+    async fn debug(&self);
+}
+
+#[async_trait]
 pub trait Runner {
     type Out;
     type Base;
@@ -23,13 +28,15 @@ pub trait TestSet {
 }
 
 // enables building of runner from init_ctx
-pub async fn start<R, C>()
+pub async fn start<R, C, Args>(args: Args)
 where
-    C: Ctx<Base = ()> + TestSet + ChildTypesFn + Send + Sync + Clone + 'static,
-    R: Runner<Base = C> + Send + Sync,
+    C: Ctx<Base = Args> + TestSet + ChildTypesFn + Send + Sync + Clone + 'static,
+    R: Runner<Base = C, Out = Result<()>> + Send + Sync,
     ChildTypes<C>: MapFn<Driver<R>, C>,
+    C: DebugTrait,
 {
-    let init_ctx = C::build(()).await;
+    let init_ctx = C::build(args).await;
+    init_ctx.debug().await;
     let runner = R::new(init_ctx.clone());
     let mut driver = Driver::new(runner);
     driver.run_ctx(init_ctx).await;
@@ -40,7 +47,7 @@ pub struct Driver<R> {
 }
 impl<R> Driver<R>
 where
-    R: Runner + Send + Sync,
+    R: Runner<Out = Result<()>> + Send + Sync,
 {
     fn new(runner: R) -> Self {
         Self { runner }
@@ -51,7 +58,7 @@ where
         ChildTypes<C>: MapFn<Self, C>,
     {
         let tests = C::tests();
-        self.runner.run(&ctx, tests).await;
+        self.runner.run(&ctx, tests).await.unwrap();
         tmap::<Self, C, ChildTypes<C>>(self, ctx).await;
     }
 }
@@ -59,7 +66,7 @@ where
 impl<T, R, C> Func<T, C> for Driver<R>
 where
     T: Ctx<Base = C> + TestSet + ChildTypesFn + Send + Sync + Clone + 'static,
-    R: Runner + Send + Sync,
+    R: Runner<Out = Result<()>> + Send + Sync,
     C: Ctx + Send + 'static,
     ChildTypes<T>: MapFn<Self, T>,
 {
