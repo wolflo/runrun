@@ -35,7 +35,7 @@ pub struct TCons<H, T> {
 // Runner should be built from initial state that user designates with #[run_state(init)]
 //  - should take only a context and a list of tests -- see proptest lib
 pub trait Runner<T> {
-    fn run(&self, ctx: &T, tests: &'static [fn(T)]) -> Result<()>;
+    fn run(&self, tests: &'static [fn(T)]) -> Result<()>;
 
     // fn build<B, R: Self<B>>(base: R) -> Self;
     // fn build<C, R: Runner<C>>(&self, ctx: C) -> R;
@@ -122,48 +122,49 @@ type ChildTypes<T> = <T as ChildTypesFn>::Out;
 // If specialization were more advanced (specifically, if default associated
 // types were not treated as opaque types), we could use GATs to allow different
 // return types for the same Func applied to different input types
-type Apply<F, T> = <F as Func<T>>::Out;
-pub trait Func<T> {
+type Apply<F, Args, T> = <F as Func<T, Args>>::Out;
+pub trait Func<T, Args> {
     type Out;
-    fn apply() -> Self::Out;
+    fn call(args: Args) -> Self::Out;
 }
 
-type Map<F, Lst> = <Lst as MapFn<F>>::Out;
-fn tmap<F, Lst>() -> Map<F, Lst> where Lst: MapFn<F> {
-    <Lst as MapFn<F>>::map()
+type Map<F, Args, Lst> = <Lst as MapFn<F, Args>>::Out;
+fn tmap<F, Args, Lst>(args: Args) -> Map<F, Args, Lst> where Lst: MapFn<F, Args> {
+    <Lst as MapFn<F, Args>>::map(args)
 }
-pub trait MapFn<F> {
+pub trait MapFn<F, Args> {
     type Out; // An HList of the types of the output
-    fn map() -> Self::Out; // A populated hlist of values
+    fn map(args: Args) -> Self::Out; // A populated hlist of values
 }
-impl<F, H, T> MapFn<F> for TCons<H, T>
+impl<F, Args, H, T> MapFn<F, Args> for TCons<H, T>
 where
-    T: MapFn<F> + Elem + HeadFn,
-    F: Func<H> + Func<Head<T>>,
+    Args: Clone,
+    T: MapFn<F, Args> + Elem + HeadFn,
+    F: Func<H, Args> + Func<Head<T>, Args>,
 {
-    type Out = TCons<Apply<F, H>, Map<F, T>>;
-    fn map() -> Self::Out {
+    type Out = TCons<Apply<F, Args, H>, Map<F, Args, T>>;
+    fn map(args: Args) -> Self::Out {
         TCons {
-            head: <F as Func<H>>::apply(),
-            tail: <T as MapFn<F>>::map(),
+            head: <F as Func<H, Args>>::call(args.clone()),
+            tail: <T as MapFn<F, Args>>::map(args),
         }
     }
 }
-impl<F, H> MapFn<F> for TCons<H, TNil>
+impl<F, Args, H> MapFn<F, Args> for TCons<H, TNil>
 where
-    F: Func<H>,
+    F: Func<H, Args>,
 {
-    type Out = TCons<Apply<F, H>, TNil>;
-    fn map() -> Self::Out {
+    type Out = TCons<Apply<F, Args, H>, TNil>;
+    fn map(args: Args) -> Self::Out {
         TCons {
-            head: <F as Func<H>>::apply(),
+            head: <F as Func<H, Args>>::call(args),
             tail: TNil,
         }
     }
 }
-impl<F> MapFn<F> for TNil {
+impl<F, Args> MapFn<F, Args> for TNil {
     type Out = TNil;
-    fn map() -> Self::Out { TNil }
+    fn map(_: Args) -> Self::Out { TNil }
 }
 pub trait Elem {}
 impl<H, T: Elem> Elem for TCons<H, T> {}
@@ -190,11 +191,32 @@ impl<T> ToVec<T> for TNil {
     }
 }
 
-struct Run;
-impl<T: BuildMe> Func<T> for Run {
+// fn tmap_children<F, Args, T>(args: Args) -> Map<F, Args, ChildTypes<T>> where T: ChildTypesFn, ChildTypes<T>: MapFn<F, Args> {
+    // type Children = ChildTypes<T>;
+    // ChildTypes<T>::map(args)
+    // <Children as MapFn<F, Args>>::map(args)
+// }
+fn foo<T>() where T: HeadFn, Head<T>: TestSet + 'static {
+    let _ = Head::<T>::tests();
+}
+struct Driver;
+impl<T, R, C> Func<T, (R, C)> for Driver
+where
+    T: Ctx<Base = C> + TestSet + ChildTypesFn + Clone + 'static,
+    R: Runner<C>,
+    C: Ctx + Clone,
+    ChildTypes<T>: MapFn<Self, (R, C)>,
+{
     type Out = Arc<Result<()>>;
-    fn apply() -> Self::Out {
-        let ctx = T::build();
+    fn call(args: (R, C)) -> Self::Out {
+        let ctx = T::build(args.1.clone());
+        let tests = T::tests();
+        // let runner = R::new(&args.1.clone());
+        // runner.run(tests);
+        for t in tests {
+            t(ctx.clone())
+        }
+        ChildTypes::<T>::map(args);
         Arc::new(Ok(()))
     }
 }
@@ -270,7 +292,7 @@ mod tests {
         type L = TCons<u8, TCons<u16, TNil>>;
         // let run_mapped = tmap::<Run, Lst>().to_vec();
         // dbg!(run_mapped);
-        let other_mapped = <L as MapFn<OtherFn>>::map().to_vec();
+        let other_mapped = <L as MapFn<NullFn, ()>>::map(()).to_vec();
         dbg!(other_mapped);
     }
 }
@@ -297,7 +319,7 @@ impl<N> TIsZeroFn for Succ<N> {
         False
     }
 }
-struct NullFn;
+// struct NullFn;
 // impl Func for NullFn {
 //     type Out = ();
 //     fn apply<H>() -> Self::Out {
@@ -377,13 +399,13 @@ where
     }
 }
 
-pub struct GNil<T>(PhantomData<T>);
-impl<F: Func<T>, T> MapFn<F> for GNil<T> {
-    type Out = TNil;
-    fn map() -> Self::Out {
-        TNil
-    }
-}
+// pub struct GNil<T>(PhantomData<T>);
+// impl<F: Func<T>, T> MapFn<F> for GNil<T> {
+//     type Out = TNil;
+//     fn map() -> Self::Out {
+//         TNil
+//     }
+// }
 
 // let b = Build;
 // let f: fn(u8) = b.build();
@@ -401,10 +423,10 @@ impl<T: Trait> Builder<T> for Build {
     }
 }
 
-struct OtherFn;
-impl<T: Trait> Func<T> for OtherFn {
+struct NullFn;
+impl<T: Trait> Func<T, ()> for NullFn {
     type Out = ();
-    fn apply() -> Self::Out {
+    fn call(_: ()) -> Self::Out {
         ()
     }
 }
