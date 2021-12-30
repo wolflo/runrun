@@ -2,6 +2,14 @@ use anyhow::Result;
 use async_trait::async_trait;
 use futures::future::Future;
 use std::marker::PhantomData;
+use std::sync::Arc;
+
+// Type-level cons list
+pub struct TNil;
+pub struct TCons<H, T> {
+    head: H,
+    tail: T,
+}
 
 // Need to bind a single fn across a TList, but a simple ptr to a generic fn will be
 // monomorphized for the first type so won't work.
@@ -122,108 +130,33 @@ pub trait ChildTypesFn {
 }
 type ChildTypes<T> = <T as ChildTypesFn>::Out;
 
-// Type-level cons list
-pub struct TNil;
-// pub struct TCons<H, T>(PhantomData<(H, T)>);
-pub struct TCons<H, T> {
-    head: H,
-    tail: T,
-}
-pub trait TList2 {
-    fn map_fn<F>(f: F);
-}
-pub trait TList<B> {
-    fn map(base: B);
-}
-impl<B> TList<B> for TNil {
-    fn map(_: B) {
-        println!("TNil");
-    }
-}
-
-impl<T> RunRunImplementer for T
-where
-    T: BuildMe + TestSet + ChildTypesFn + Clone + 'static,
-    ChildTypes<T>: RunRunImplementer,
-{
-    fn run() {
-        let ctx = Self::build();
-        let tests = Self::tests();
-        for t in tests {
-            t(ctx.clone());
-        }
-        ChildTypes::<Self>::run();
-    }
-    fn run_fn<F>(f: F)
-    where
-        F: FnOnce(),
-    {
-        // Self::f();
-    }
-}
-pub trait BuildMe {
-    fn build() -> Self;
-}
-pub trait RunRunImplementer {
-    fn run();
-    fn run_fn<F>(f: F)
-    where
-        F: FnOnce();
-}
-impl<B, H, T: TList<B>> TList<B> for TCons<H, T>
-where
-    H: Ctx<Base = B> + TestSet + ChildTypesFn + Clone + 'static,
-    ChildTypes<H>: TList<H>,
-    B: Clone,
-{
-    fn map(base: B) {
-        let ctx = H::build(base.clone());
-        let tests = H::tests();
-        for t in tests {
-            t(ctx.clone());
-        }
-        ChildTypes::<H>::map(ctx);
-
-        // Func is a Fn (trait) that takes a type (H) and returns an FnOnce
-        // Func<H>();
-        // H::run(base);
-        T::map(base);
-    }
-}
-
-pub trait TypeToTypeFn {
-    type Out;
-}
-
-// F takes a type as an arg
-pub trait MapFn<F> {
-    type Out; // An HList of the types of the output
-    fn map() -> Self::Out; // A populated hlist of values
-}
 
 // Func is essentially FnOnce as an associated function (without a self param)
 // with an added generic arg to apply() / call_once().
 // If specialization were more advanced (specifically, if default associated
 // types were not treated as opaque types), we could use GATs to allow different
 // return types for the same Func applied to different input types
+type Apply<F> = <F as Func>::Out;
 pub trait Func {
     type Out;
     fn apply<H>() -> Self::Out;
 }
 
-// Instead of Run<()>, we need F: Func, and F::Apply<>
+type Map<F, Lst> = <Lst as MapFn<F>>::Out;
+pub trait MapFn<F> {
+    type Out; // An HList of the types of the output
+    fn map() -> Self::Out; // A populated hlist of values
+}
 impl<F, H, T> MapFn<F> for TCons<H, T>
 where
     T: MapFn<F>,
-    // F: Run<()>
     F: Func,
 {
-    // type Out = TCons<<F as Func>::Out, <T as MapFn<F>>::Out>;
     type Out = TCons<Apply<F>, Map<F, T>>;
-    // type Out = TCons<<F as Func>::Apply, <T as MapFn<F>>::Out>;
-    // fn map() -> Self::Out { TCons(<H as Run<()>>::call(()), <T as MapFn<F>>::map()) }
-    // fn map() -> Self::Out { TCons(<H as TIsZeroFn>::call(), <T as MapFn<F>>::map()) }
     fn map() -> Self::Out {
+        // I want to map f across a TList where f is an associated fn
+        // implemented by all types in the TList
+        // Self::F
         TCons {
             head: <F as Func>::apply::<H>(),
             tail: <T as MapFn<F>>::map(),
@@ -236,8 +169,6 @@ impl<F: Func> MapFn<F> for TNil {
         TNil
     }
 }
-type Map<F, Lst> = <Lst as MapFn<F>>::Out;
-type Apply<F> = <F as Func>::Out;
 
 pub trait ToVec<T> {
     fn to_vec(&mut self) -> Vec<T>;
@@ -259,46 +190,12 @@ impl<T> ToVec<T> for TNil {
     }
 }
 
-// Implemented for any list containing only elements of the same type
-pub trait Mono {}
-impl Mono for TNil {}
-impl<H> Mono for TCons<H, TNil> {}
-impl<H, T> Mono for TCons<H, T>
-where
-    (H, Head<T>): TEq,
-    T: HeadFn + Mono,
-{
-}
-pub trait TEq {}
-impl<T> TEq for (T, T) {}
-
-// H::map(f);
-
-// Need to map a TypeToValFn over a TList, generating a Vec<Output>
-// This trait represents a fn from a type (Self) and a set of values (Args)
-// to a value of type Output
-// To map a different TypeToValFn, make a new trait with the same fields
-pub trait TypeToValFn<Args> {
-    type Out;
-    fn call(self, args: Args) -> Self::Out;
-}
-pub trait Run<Args> {
-    type Out;
-    fn call(args: Args) -> Self::Out;
-}
-impl<T> Run<()> for T
-where
-    T: BuildMe + TestSet + ChildTypesFn + Clone + 'static,
-    ChildTypes<T>: RunRunImplementer,
-{
-    type Out = ();
-    fn call(args: ()) -> Self::Out {
-        let ctx = Self::build();
-        let tests = Self::tests();
-        for t in tests {
-            t(ctx.clone());
-        }
-        ChildTypes::<Self>::run();
+struct Run;
+impl Func for Run {
+    type Out = Arc<Result<()>>;
+    fn apply<H>() -> Self::Out {
+        // let ctx = H::build();
+        Arc::new(Ok(()))
     }
 }
 
@@ -362,14 +259,10 @@ mod tests {
         type Out = TNil;
     }
 
-    fn foo<T: Mono>() {}
-
     #[test]
     fn test() {
-        // Lst::map(NullCtx);
         type L = TCons<u8, TCons<u16, TNil>>;
-        // foo::<L>();
-        let x = <Lst as MapFn<NullFn>>::map().to_vec();
+        let x = <Lst as MapFn<Run>>::map().to_vec();
         let x = TCons { head: 1, tail: TCons { head: 'c', tail: TNil }};
         // let x = <Lst as MapFn<NullFn>>::map();
         // let x = TakeFn::<Succ<One>>::take(x);
@@ -405,11 +298,110 @@ impl Func for NullFn {
 pub struct True;
 pub struct False;
 
+// Implemented for any list containing only elements of the same type
+pub trait Mono {}
+impl Mono for TNil {}
+impl<H> Mono for TCons<H, TNil> {}
+impl<H, T> Mono for TCons<H, T>
+where
+    (H, Head<T>): TEq,
+    T: HeadFn + Mono,
+{
+}
+pub trait TEq {}
+impl<T> TEq for (T, T) {}
+
+pub trait TList<B> {
+    fn map(base: B);
+}
+impl<B> TList<B> for TNil {
+    fn map(_: B) {
+        println!("TNil");
+    }
+}
+impl<T> RunRunImplementer for T
+where
+    T: BuildMe + TestSet + ChildTypesFn + Clone + 'static,
+    ChildTypes<T>: RunRunImplementer,
+{
+    fn run() {
+        let ctx = Self::build();
+        let tests = Self::tests();
+        for t in tests {
+            t(ctx.clone());
+        }
+        ChildTypes::<Self>::run();
+    }
+    fn run_fn<F>(f: F)
+    where
+        F: FnOnce(),
+    {
+        // Self::f();
+    }
+}
+pub trait BuildMe {
+    fn build() -> Self;
+}
+pub trait RunRunImplementer {
+    fn run();
+    fn run_fn<F>(f: F)
+    where
+        F: FnOnce();
+}
+impl<B, H, T: TList<B>> TList<B> for TCons<H, T>
+where
+    H: Ctx<Base = B> + TestSet + ChildTypesFn + Clone + 'static,
+    ChildTypes<H>: TList<H>,
+    B: Clone,
+{
+    fn map(base: B) {
+        let ctx = H::build(base.clone());
+        let tests = H::tests();
+        for t in tests {
+            t(ctx.clone());
+        }
+        ChildTypes::<H>::map(ctx);
+        // Func is a Fn (trait) that takes a type (H) and returns an FnOnce
+        // Func<H>();
+        // H::run(base);
+        T::map(base);
+    }
+}
+
+
 // impl<H, T> Iterator for TCons<H, T> where H: Clone, T: HeadFn<Out = H> + DropFn<One> + Clone {
 //     type Item = H;
 //     fn next(&mut self) -> Option<Self::Item> {
 //         self.head = self.tail.clone().head();
 //         self.tail = self.tail.drop(1);
 //         Some(self.head.clone())
+//     }
+// }
+
+// Need to map a TypeToValFn over a TList, generating a Vec<Output>
+// This trait represents a fn from a type (Self) and a set of values (Args)
+// to a value of type Output
+// To map a different TypeToValFn, make a new trait with the same fields
+// pub trait TypeToValFn<Args> {
+//     type Out;
+//     fn call(self, args: Args) -> Self::Out;
+// }
+// pub trait Run<Args> {
+//     type Out;
+//     fn call(args: Args) -> Self::Out;
+// }
+// impl<T> Run<()> for T
+// where
+//     T: BuildMe + TestSet + ChildTypesFn + Clone + 'static,
+//     ChildTypes<T>: RunRunImplementer,
+// {
+//     type Out = ();
+//     fn call(args: ()) -> Self::Out {
+//         let ctx = Self::build();
+//         let tests = Self::tests();
+//         for t in tests {
+//             t(ctx.clone());
+//         }
+//         ChildTypes::<Self>::run();
 //     }
 // }
