@@ -18,9 +18,7 @@ pub fn make_factory<M>(name: &str, client: &Arc<M>) -> Result<ContractFactory<M>
 
     let bin_raw = fs::read_to_string(&build_dir.join(name + ".bin"))?;
     let bin_raw = bin_raw.trim_end_matches("\n");
-    // dbg!(bin_raw.clone());
     let bin: Bytes = hex::decode(&bin_raw)?.into();
-    // let bin: Bytes = hex::decode("6080")?.into();
 
     Ok(ContractFactory::new(abi, bin, client.clone()))
 }

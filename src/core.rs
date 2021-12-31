@@ -1,8 +1,32 @@
 use anyhow::Result;
 use async_trait::async_trait;
+use futures::future::Future;
 use std::sync::Arc;
 
 use crate::ty::{tmap, ChildTypes, ChildTypesFn, TFn, MapFn};
+
+pub struct TestResult {
+    status: Status,
+}
+enum Status {
+    Pass,
+    Fail,
+}
+// Testable impl will do things like catch panics and provide diagnostic info
+#[async_trait]
+pub trait Testable<Args> {
+    async fn result(&self, args: Args) -> TestResult;
+}
+// impl<T, E> Testable for Result<T, E>
+// where
+//     A: Testable,
+//     E: Debug + 'static,
+// {
+
+// }
+// pub type Test<Args> = &'static (dyn Testable<Args> + Sync);
+pub type AsyncResult<R> = std::pin::Pin<Box<dyn Future<Output = R> + Send>>;
+pub type Test<T> = &'static (dyn Fn(T) -> AsyncResult<()> + Sync);
 
 #[async_trait]
 pub trait DebugTrait {
@@ -14,9 +38,9 @@ pub trait Runner {
     type Out;
     type Base;
     fn new(base: Self::Base) -> Self;
-    async fn run<T>(&mut self, ctx: &T, tests: &'static [fn(T)]) -> Self::Out
+    async fn run<T>(&mut self, ctx: &T, tests: &'static [Test<T>]) -> Self::Out
     where
-        T: Sync + Clone;
+        T: Send + Sync + Clone;
 }
 #[async_trait]
 pub trait Ctx {
@@ -24,7 +48,7 @@ pub trait Ctx {
     async fn build(base: Self::Base) -> Self;
 }
 pub trait TestSet {
-    fn tests() -> &'static [fn(Self)];
+    fn tests() -> &'static [Test<Self>];
 }
 
 // enables building of runner from init_ctx
@@ -52,7 +76,7 @@ where
     }
     async fn run_ctx<C>(&mut self, ctx: C)
     where
-        C: TestSet + ChildTypesFn + Sync + Clone + 'static,
+        C: TestSet + ChildTypesFn + Send + Sync + Clone + 'static,
         ChildTypes<C>: MapFn<Self, C>,
     {
         let tests = C::tests();

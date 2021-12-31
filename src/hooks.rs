@@ -1,7 +1,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
-use crate::core::Runner;
+use crate::core::{Runner, Test};
 
 #[async_trait]
 pub trait Hooks: Clone + Send + Sync {
@@ -32,14 +32,14 @@ impl<H: Hooks> Runner for HookRunner<H> {
         let hooks = H::new(base);
         Self { hooks }
     }
-    async fn run<T>(&mut self, ctx: &T, tests: &'static [fn(T)]) -> Self::Out
+    async fn run<T>(&mut self, ctx: &T, tests: &'static [Test<T>]) -> Self::Out
     where
-        T: Sync + Clone,
+        T: Send + Sync + Clone,
     {
         self.hooks.before().await?;
         for t in tests {
             self.hooks.before_each().await?;
-            t(ctx.clone());
+            t(ctx.clone()).await;
             self.hooks.after_each().await?;
         }
         self.hooks.after().await?;
