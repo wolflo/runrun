@@ -1,13 +1,13 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use ethers::{
-    types::{U256, Address},
     signers::Signer,
+    types::{Address, U256},
 };
 
-use runrun::{run_ctx, run_test, core::Ctx};
+use runrun::{core::Ctx, run_ctx, run_test};
 
-use crate::{utils::ERC20MinterPauser, block1::Ctx1, init::Client};
+use crate::{block1::Ctx1, init::Client, utils::ERC20MinterPauser};
 
 #[derive(Clone)]
 pub struct Ctx3 {
@@ -25,7 +25,12 @@ impl Ctx for Ctx3 {
     async fn build(base: Self::Base) -> Self {
         let transfer_amt = base.minted_amt / 2;
         let transfer_receiver = base.accts[2].address();
-        base.token.transfer(transfer_receiver, transfer_amt).from(base.mint_receiver).send().await.unwrap();
+        base.token
+            .transfer(transfer_receiver, transfer_amt)
+            .from(base.mint_receiver)
+            .send()
+            .await
+            .unwrap();
         Self {
             token: base.token,
             minted_amt: base.minted_amt,

@@ -1,9 +1,12 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
-use runrun::{run_ctx, run_test, core::Ctx};
+use runrun::{core::Ctx, run_ctx, run_test};
 
-use crate::{utils::ERC20MinterPauser, init::{Ctx0, Client}};
+use crate::{
+    init::{Client, Ctx0},
+    utils::ERC20MinterPauser,
+};
 
 #[derive(Clone)]
 pub struct Ctx2 {
@@ -16,9 +19,7 @@ impl Ctx for Ctx2 {
     type Base = Ctx0;
     async fn build(base: Self::Base) -> Self {
         base.token.pause().send().await.unwrap();
-        Self {
-            token: base.token,
-        }
+        Self { token: base.token }
     }
 }
 

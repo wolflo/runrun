@@ -2,8 +2,8 @@ use anyhow::Result;
 
 use crate::init::Ctx0;
 
-use runrun::run_test;
 use crate::init::TESTS_ON_CTX0;
+use runrun::run_test;
 
 #[run_test]
 async fn test_not_paused(ctx: Ctx0) -> Result<()> {

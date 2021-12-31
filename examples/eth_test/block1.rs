@@ -1,16 +1,19 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use std::sync::Arc;
 use ethers::{
     prelude::LocalWallet,
-    utils::parse_ether,
-    types::{U256, Address},
     signers::Signer,
+    types::{Address, U256},
+    utils::parse_ether,
 };
+use std::sync::Arc;
 
-use runrun::{run_ctx, run_test, core::Ctx};
+use runrun::{core::Ctx, run_ctx, run_test};
 
-use crate::{utils::ERC20MinterPauser, init::{Ctx0, Client}};
+use crate::{
+    init::{Client, Ctx0},
+    utils::ERC20MinterPauser,
+};
 
 #[derive(Clone)]
 pub struct Ctx1 {
@@ -28,7 +31,11 @@ impl Ctx for Ctx1 {
     async fn build(base: Self::Base) -> Self {
         let minted_amt = parse_ether(100).unwrap();
         let mint_receiver = base.accts[1].address();
-        base.token.mint(mint_receiver, minted_amt).send().await.unwrap();
+        base.token
+            .mint(mint_receiver, minted_amt)
+            .send()
+            .await
+            .unwrap();
         Self {
             client: base.client,
             accts: base.accts,
