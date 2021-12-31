@@ -1,25 +1,22 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use futures::{future::Future, FutureExt};
-use std::{fmt, fmt::Debug, panic::AssertUnwindSafe, sync::Arc};
+use std::{fmt, fmt::Debug, panic::AssertUnwindSafe, sync::Arc, ops::Deref};
 
 use crate::ty::{tmap, ChildTypes, ChildTypesFn, FnT, MapFn};
 
 pub type AsyncOutput<R> = std::pin::Pin<Box<dyn Future<Output = R> + Send>>;
-pub type AsyncFn<X, Y> = &'static (dyn Fn(X) -> AsyncOutput<Y> + Sync);
-pub trait DebugTest<T>: Test<T> + Debug + Send + Sync {}
-impl<T, U> DebugTest<T> for U where U: Test<T> + Debug + Send + Sync {}
-pub type Testable<T> = &'static dyn DebugTest<T>;
+pub type AsyncFn<X, Y> = dyn Fn(X) -> AsyncOutput<Y> + Send + Sync;
 
 #[async_trait]
 pub trait Runner {
     type Out;
     type Base;
     fn new(base: Self::Base) -> Self;
-    async fn run<C, T>(&mut self, ctx: &C, tests: &'static [&T]) -> Self::Out
+    async fn run<C, T>(&mut self, ctx: &C, tests: &'static [T]) -> Self::Out
     where
         C: Send + Sync + Clone,
-        T: Test<C> + Debug + ?Sized + Send + Sync;
+        T: Test<C> + Send + Sync;
 }
 #[async_trait]
 pub trait Ctx {
@@ -27,49 +24,88 @@ pub trait Ctx {
     async fn build(base: Self::Base) -> Self;
 }
 pub trait TestSet {
-    fn tests() -> &'static [Testable<Self>];
+    fn tests() -> &'static [&'static dyn Test<Self>];
 }
 
-pub struct TestResult {
+#[derive(Debug)]
+pub struct TestOutput {
     pub status: Status,
 }
+pub struct TestResult {
+    pub output: TestOutput,
+    pub trace: Box<dyn Debug + Send + Sync>,
+}
+#[async_trait]
+pub trait Test<Args>: Testable<Args> + Trace + Send + Sync {
+    async fn run(&self, args: Args) -> TestResult;
+    fn skip(&self, args: Args) -> TestResult;
+}
+pub trait Trace {
+    fn trace(&self) -> Box<dyn Debug + Send + Sync>;
+}
+#[async_trait]
+impl<T, Args> Test<Args> for T
+where
+    T: Testable<Args> + Trace + Send + Sync,
+    Args: 'static + Send,
+{
+    async fn run(&self, args: Args) -> TestResult {
+        TestResult {
+            output: self.resolve(args).await,
+            trace: self.trace(),
+        }
+    }
+    fn skip(&self, args: Args) -> TestResult {
+        TestResult {
+            output: self.skip(args),
+            trace: self.trace(),
+        }
+    }
+}
+#[derive(Debug, Clone, Copy)]
 pub enum Status {
     Pass,
     Fail,
+    Skip,
 }
 #[async_trait]
-pub trait Test<Args> {
-    async fn run(&self, args: Args) -> TestResult;
+pub trait Testable<Args> {
+    async fn resolve(&self, args: Args) -> TestOutput;
+    fn skip(&self, _args: Args) -> TestOutput {
+        TestOutput {
+            status: Status::Skip
+        }
+    }
 }
 #[async_trait]
-impl<Args, Y> Test<Args> for AsyncFn<Args, Y>
+impl<Args, Y> Testable<Args> for AsyncFn<Args, Y>
 where
     Args: Send + Sync,
-    Y: Test<()> + Send + Sync,
+    Y: Testable<()> + Send + Sync,
 {
-    async fn run(&self, args: Args) -> TestResult {
+    async fn resolve(&self, args: Args) -> TestOutput {
         let res = AssertUnwindSafe(self(args))
             .catch_unwind()
             .await
             .map_err(|e| anyhow::anyhow!("Test panic: {:?}", e));
-        res.run(()).await
+        res.resolve(()).await
     }
 }
 // Any Result resolves either to a Failing test case or to the result of
 // testing the contained value
 #[async_trait]
-impl<T, E, Args> Test<Args> for Result<T, E>
+impl<T, E, Args> Testable<Args> for Result<T, E>
 where
     Args: Send + Sync + 'static,
-    T: Test<Args> + Sync,
+    T: Testable<Args> + Sync,
     E: Sync + Debug,
 {
-    async fn run(&self, args: Args) -> TestResult {
+    async fn resolve(&self, args: Args) -> TestOutput {
         match self {
-            Ok(r) => r.run(args).await,
+            Ok(r) => r.resolve(args).await,
             Err(e) => {
                 println!("Test failure! Err: {:?}", e);
-                TestResult {
+                TestOutput {
                     status: Status::Fail,
                 }
             }
@@ -78,14 +114,32 @@ where
 }
 // () is a trivially passing Test
 #[async_trait]
-impl<Args> Test<Args> for ()
+impl<Args> Testable<Args> for ()
 where
     Args: Send + 'static,
 {
-    async fn run(&self, _args: Args) -> TestResult {
-        TestResult {
+    async fn resolve(&self, _args: Args) -> TestOutput {
+        TestOutput {
             status: Status::Pass,
         }
+    }
+}
+#[async_trait]
+impl<Args, T> Testable<Args> for &T
+where
+    T: Testable<Args> + ?Sized + Send + Sync,
+    Args: Send + 'static,
+{
+    async fn resolve(&self, args: Args) -> TestOutput {
+        (**self).resolve(args).await
+    }
+}
+impl<T> Trace for &T
+where
+    T: Trace + ?Sized
+{
+    fn trace(&self) -> Box<dyn Debug + Send + Sync> {
+        (**self).trace()
     }
 }
 
@@ -94,17 +148,22 @@ pub struct TestCase<X: 'static> {
     pub test: AsyncFn<X, Result<()>>,
 }
 #[async_trait]
-impl<Args> Test<Args> for TestCase<Args>
+impl<Args> Testable<Args> for TestCase<Args>
 where
     Args: Send + Sync,
 {
-    async fn run(&self, args: Args) -> TestResult {
-        self.test.run(args).await
+    async fn resolve(&self, args: Args) -> TestOutput {
+        self.test.resolve(args).await
     }
 }
 impl<Args> Debug for TestCase<Args> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.name)
+    }
+}
+impl<Args> Trace for TestCase<Args> {
+    fn trace(&self) -> Box<dyn Debug + Send + Sync> {
+        Box::new(self.name)
     }
 }
 
