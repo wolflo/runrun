@@ -13,9 +13,9 @@ type Client = DevRpcMiddleware<SignerMiddleware<Provider<Http>, Wallet<SigningKe
 
 #[derive(Clone)]
 pub struct Ctx0 {
-    client: Arc<Client>,
-    accts: Vec<LocalWallet>,
-    token: ERC20MinterPauser<Client>,
+    pub client: Arc<Client>,
+    pub accts: Vec<LocalWallet>,
+    pub token: ERC20MinterPauser<Client>,
 }
 
 #[async_trait]
