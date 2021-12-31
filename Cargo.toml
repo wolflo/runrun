@@ -13,3 +13,6 @@ ethers = { path = "../ext/ethers-rs/", features = ["legacy", "dev-rpc"] }
 
 [dev-dependencies]
 tokio = { version = "1.15.0", features = ["rt", "macros"] }
+serde = { version = "1.0.124", features = ["derive"] }
+serde_json = "1.0.64"
+hex = { version = "0.4.3", default-features = false, features = ["std"] }
