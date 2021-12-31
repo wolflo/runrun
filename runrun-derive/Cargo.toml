@@ -17,6 +17,6 @@ trybuild = { version = "1.0.53", features = ["diff"] }
 runrun = { path = "../" }
 
 [dependencies]
-syn = { version = "1.0.82", features = ["full"] }
+syn = { version = "1.0.82", features = ["full", "extra-traits"] }
 quote = "1.0.10"
 proc-macro2 = "1.0.33"

@@ -63,7 +63,7 @@ impl DevRpcCtx for Ctx0 {
 }
 
 // -- Macro generated
-use crate::block1::Ctx1;
-impl ChildTypesFn for Ctx0 {
-    type Out = TList!(Ctx1);
-}
+// use crate::block1::Ctx1;
+// impl ChildTypesFn for Ctx0 {
+//     type Out = TList!(Ctx1);
+// }

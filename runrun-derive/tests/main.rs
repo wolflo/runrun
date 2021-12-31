@@ -3,16 +3,17 @@
 #![allow(unused_variables)]
 
 use runrun_derive::{run_ctx, run_test, collect};
-use runrun::{tlist, TList};
+use runrun::{tlist, TList, register_ctx};
 
 pub struct Ctx0;
 pub struct Ctx1;
+pub struct Ctx2;
 
-#[async_trait]
-pub trait Ctx {
-    type Base;
-    async fn build(base: Self::Base) -> Self;
-}
+// #[async_trait]
+// pub trait Ctx {
+//     type Base;
+//     async fn build(base: Self::Base) -> Self;
+// }
 
 #[test]
 pub fn tests() {
@@ -26,6 +27,8 @@ pub fn tests() {
     //     }
     // }
     // collect!();
+    // register_ctx!(Ctx0, [Ctx1]);
+    register_ctx!(Ctx0);
     // tlist![1,2,3];
     // type T = TList!(usize, u8);
 }

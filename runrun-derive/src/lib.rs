@@ -1,3 +1,6 @@
+#![feature(log_syntax)]
+
+use proc_macro2::{Span, TokenStream as TokenStream2};
 use proc_macro::TokenStream;
 use quote::{quote, format_ident};
 use syn::parse_macro_input;
@@ -59,6 +62,9 @@ pub fn run_ctx(_attr: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 #[proc_macro]
-pub fn collect(_item: TokenStream) -> TokenStream {
+pub fn collect(input: TokenStream) -> TokenStream {
+    let span = Span::call_site();
+    // let x = span.source_file();
+    // eprintln!("input: {:?}", x);
     "fn answer() -> u32 { 42 }".parse().unwrap()
 }
