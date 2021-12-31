@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use futures::{future::Future, FutureExt};
 use std::{fmt, fmt::Debug, panic::AssertUnwindSafe, sync::Arc};
 
-use crate::ty::{tmap, ChildTypes, ChildTypesFn, MapFn, TFn};
+use crate::ty::{tmap, ChildTypes, ChildTypesFn, FnT, MapFn};
 
 pub type AsyncOutput<R> = std::pin::Pin<Box<dyn Future<Output = R> + Send>>;
 pub type AsyncFn<X, Y> = &'static (dyn Fn(X) -> AsyncOutput<Y> + Sync);
@@ -142,7 +142,7 @@ where
     }
 }
 #[async_trait]
-impl<T, R, C> TFn<T, C> for Driver<R>
+impl<T, R, C> FnT<T, C> for Driver<R>
 where
     T: Ctx<Base = C> + TestSet + ChildTypesFn + Send + Sync + Clone + 'static,
     R: Runner<Out = Result<()>> + Send + Sync,

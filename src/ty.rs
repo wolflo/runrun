@@ -81,11 +81,11 @@ where
     }
 }
 
-// TFn is essentially FnMut with an additional generic parameter that is not included
+// FnT is essentially FnMut with an additional generic parameter that is not included
 // in the type signature of call().
-type Apply<F, Args, T> = <F as TFn<T, Args>>::Out;
+type Apply<F, Args, T> = <F as FnT<T, Args>>::Out;
 #[async_trait]
-pub trait TFn<T, Args> {
+pub trait FnT<T, Args> {
     type Out;
     async fn call(&mut self, args: Args) -> Self::Out;
 }
@@ -94,7 +94,7 @@ pub trait TFn<T, Args> {
 // of the function must be the same for all types.
 // If specialization were more advanced (specifically, if default associated
 // types were not treated as opaque types), we could use GATs to allow different
-// return types for the same TFn applied to different input types.
+// return types for the same FnT applied to different input types.
 type Map<F, Args, Lst> = <Lst as MapFn<F, Args>>::Out;
 pub async fn tmap<F, Args, Lst>(f: &mut F, args: Args) -> Map<F, Args, Lst>
 where
@@ -111,14 +111,14 @@ pub trait MapFn<F, Args> {
 impl<F, Args, H, T> MapFn<F, Args> for TCons<H, T>
 where
     T: MapFn<F, Args> + Elem + HeadFn,
-    F: TFn<H, Args> + TFn<Head<T>, Args> + Send + Sync,
+    F: FnT<H, Args> + FnT<Head<T>, Args> + Send + Sync,
     Args: Send + Sync + Clone + 'static,
     Apply<F, Args, H>: Send,
 {
     type Out = TCons<Apply<F, Args, H>, Map<F, Args, T>>;
     async fn map(f: &mut F, args: Args) -> Self::Out {
         TCons {
-            head: <F as TFn<H, Args>>::call(f, args.clone()).await,
+            head: <F as FnT<H, Args>>::call(f, args.clone()).await,
             tail: <T as MapFn<F, Args>>::map(f, args).await,
         }
     }
@@ -126,14 +126,14 @@ where
 #[async_trait]
 impl<F, Args, H> MapFn<F, Args> for TCons<H, TNil>
 where
-    F: TFn<H, Args> + Send,
+    F: FnT<H, Args> + Send,
     Args: Send + 'static,
     Apply<F, Args, H>: Send,
 {
     type Out = TCons<Apply<F, Args, H>, TNil>;
     async fn map(f: &mut F, args: Args) -> Self::Out {
         TCons {
-            head: <F as TFn<H, Args>>::call(f, args).await,
+            head: <F as FnT<H, Args>>::call(f, args).await,
             tail: TNil,
         }
     }
