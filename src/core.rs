@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use futures::future::Future;
 use std::sync::Arc;
 
-use crate::ty::{tmap, ChildTypes, ChildTypesFn, TFn, MapFn};
+use crate::ty::{tmap, ChildTypes, ChildTypesFn, MapFn, TFn};
 
 pub struct TestResult {
     status: Status,

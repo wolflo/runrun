@@ -1,6 +1,6 @@
 use anyhow::Result;
-use std::{fs, sync::Arc, path::Path};
 use ethers::prelude::*;
+use std::{fs, path::Path, sync::Arc};
 
 const BUILD_DIR: &str = "./examples/eth_test/out";
 abigen!(
@@ -9,7 +9,10 @@ abigen!(
     event_derives(serde::Deserialize, serde::Serialize)
 );
 
-pub fn make_factory<M>(name: &str, client: &Arc<M>) -> Result<ContractFactory<M>> where M: Middleware {
+pub fn make_factory<M>(name: &str, client: &Arc<M>) -> Result<ContractFactory<M>>
+where
+    M: Middleware,
+{
     let name = String::from(name);
     let build_dir = Path::new(BUILD_DIR);
 

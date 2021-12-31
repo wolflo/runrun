@@ -1,17 +1,11 @@
 use async_trait::async_trait;
 use ethers::{
     core::k256::ecdsa::SigningKey,
-    prelude::{
-        DevRpcMiddleware, Http, Provider, SignerMiddleware, Wallet, LocalWallet,
-    },
+    prelude::{DevRpcMiddleware, Http, LocalWallet, Provider, SignerMiddleware, Wallet},
 };
 use std::{convert::TryFrom, sync::Arc, time::Duration};
 
-use runrun::{
-    core::{Ctx},
-    eth::DevRpcCtx,
-    ty::*,
-};
+use runrun::{core::Ctx, eth::DevRpcCtx, ty::*};
 
 use crate::utils::{make_factory, ERC20MinterPauser};
 
@@ -41,14 +35,20 @@ impl Ctx for Ctx0 {
         // deploy token contract
         let factory = make_factory("ERC20MinterPauser", &client).unwrap();
         let deployed = factory
-            .deploy(("Token".to_string(), "TOK".to_string())).unwrap()
+            .deploy(("Token".to_string(), "TOK".to_string()))
+            .unwrap()
             .send()
-            .await.unwrap();
+            .await
+            .unwrap();
         let token = ERC20MinterPauser::new(deployed.address(), client.clone());
 
         println!("token address: {:?}", token.address());
 
-        Self { client, accts, token }
+        Self {
+            client,
+            accts,
+            token,
+        }
     }
 }
 
