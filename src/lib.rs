@@ -4,6 +4,7 @@ pub mod core;
 pub mod eth;
 pub mod hooks;
 pub mod ty;
+pub mod macros;
 
 pub use runrun_derive::*;
 

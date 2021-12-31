@@ -5,12 +5,12 @@ use ethers::{
 };
 use std::{convert::TryFrom, sync::Arc, time::Duration};
 
-use runrun::{core::Ctx, eth::DevRpcCtx, ty::*};
+use runrun::{core::Ctx, eth::DevRpcCtx, TList, ty::*};
 use runrun::run_ctx;
 
 use crate::utils::{make_factory, ERC20MinterPauser};
 
-type Client = DevRpcMiddleware<SignerMiddleware<Provider<Http>, Wallet<SigningKey>>>;
+pub type Client = DevRpcMiddleware<SignerMiddleware<Provider<Http>, Wallet<SigningKey>>>;
 
 #[derive(Clone)]
 pub struct Ctx0 {
@@ -63,6 +63,7 @@ impl DevRpcCtx for Ctx0 {
 }
 
 // -- Macro generated
+use crate::block1::Ctx1;
 impl ChildTypesFn for Ctx0 {
-    type Out = TNil;
+    type Out = TList!(Ctx1);
 }

@@ -2,7 +2,8 @@
 #![allow(unused_imports)]
 #![allow(unused_variables)]
 
-use runrun_derive::{run_ctx, run_test};
+use runrun_derive::{run_ctx, run_test, collect};
+use runrun::{tlist, TList};
 
 pub struct Ctx0;
 pub struct Ctx1;
@@ -17,11 +18,14 @@ pub trait Ctx {
 pub fn tests() {
     // #[run_test]
     // pub async fn foo(ctx: Ctx0) {}
-    #[run_ctx]
-    impl Ctx for Ctx0 {
-        type Base = String;
-        async fn build(args: Self::Base) -> Self {
-            Self
-        }
-    }
+    // #[run_ctx]
+    // impl Ctx for Ctx0 {
+    //     type Base = String;
+    //     async fn build(args: Self::Base) -> Self {
+    //         Self
+    //     }
+    // }
+    // collect!();
+    // tlist![1,2,3];
+    // type T = TList!(usize, u8);
 }

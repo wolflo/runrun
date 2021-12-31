@@ -57,3 +57,8 @@ pub fn run_ctx(_attr: TokenStream, item: TokenStream) -> TokenStream {
     };
     res.into()
 }
+
+#[proc_macro]
+pub fn collect(_item: TokenStream) -> TokenStream {
+    "fn answer() -> u32 { 42 }".parse().unwrap()
+}
