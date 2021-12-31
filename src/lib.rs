@@ -5,6 +5,8 @@ pub mod eth;
 pub mod hooks;
 pub mod ty;
 
+pub use runrun_derive::*;
+
 #[cfg(test)]
 mod tests {
     async fn test() {

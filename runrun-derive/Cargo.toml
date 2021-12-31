@@ -1,0 +1,21 @@
+[package]
+name = "runrun-derive"
+version = "0.1.0"
+authors = ["wolflo <wolflo@protonmail.com>"]
+edition = "2021"
+repository = "https://github.com/wolflo/runrun"
+
+[lib]
+proc-macro = true
+
+[[test]]
+name = "tests"
+path = "tests/main.rs"
+
+[dev-dependencies]
+trybuild = { version = "1.0.53", features = ["diff"] }
+
+[dependencies]
+syn = { version = "1.0.82", features = ["full"] }
+quote = "1.0.10"
+proc-macro2 = "1.0.33"

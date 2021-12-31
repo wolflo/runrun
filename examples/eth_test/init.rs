@@ -6,6 +6,7 @@ use ethers::{
 use std::{convert::TryFrom, sync::Arc, time::Duration};
 
 use runrun::{core::Ctx, eth::DevRpcCtx, ty::*};
+use runrun::run_ctx;
 
 use crate::utils::{make_factory, ERC20MinterPauser};
 
@@ -18,6 +19,7 @@ pub struct Ctx0 {
     pub token: ERC20MinterPauser<Client>,
 }
 
+#[run_ctx]
 #[async_trait]
 impl Ctx for Ctx0 {
     type Base = (String, Vec<LocalWallet>);
