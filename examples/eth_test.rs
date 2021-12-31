@@ -43,8 +43,8 @@ impl Ctx for Ctx0 {
 }
 
 impl DevRpcCtx for Ctx0 {
-    type Inner = Innerware;
-    fn client(self) -> Arc<DevRpcMiddleware<Self::Inner>> {
+    type Client = Client;
+    fn client(self) -> Self::Client {
         self.client
     }
 }

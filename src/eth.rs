@@ -4,38 +4,36 @@ use ethers::{
     providers::{DevRpcMiddleware, Middleware},
     types::U256,
 };
-use std::{marker::PhantomData, sync::Arc};
+use std::ops::Deref;
 
 use crate::hooks::*;
 
 // Convenience type for Eth DevRpc hooks (snapshot and reset between tests)
-pub type EthRunner<Ctx> =
-    HookRunner<DevRpcHooks<Arc<DevRpcMiddleware<<Ctx as DevRpcCtx>::Inner>>, Ctx>>;
+pub type EthRunner<Ctx> = HookRunner<DevRpcHooks<Ctx>>;
 
 // Should be implemented by the starting state to allow the runner to be built in start()
 pub trait DevRpcCtx {
-    type Inner: Middleware;
-    fn client(self) -> Arc<DevRpcMiddleware<Self::Inner>>;
+    type Client: Clone; // Clone required for DevRpcHooks to derive Clone
+    fn client(self) -> Self::Client;
 }
 
 #[derive(Clone)]
-pub struct DevRpcHooks<Client, Ctx> {
+pub struct DevRpcHooks<Ctx: DevRpcCtx> {
     snap_id: U256,
-    client: Client,
-    phantom: PhantomData<Ctx>, // Constrains the Ctx type that gives us the client
+    client: <Ctx as DevRpcCtx>::Client,
 }
 #[async_trait]
-impl<M, Ctx> Hooks for DevRpcHooks<Arc<DevRpcMiddleware<M>>, Ctx>
+impl<M, I, Ctx> Hooks for DevRpcHooks<Ctx>
 where
-    M: Middleware + Clone + 'static,
-    Ctx: DevRpcCtx<Inner = M> + Send + Sync + Clone,
+    M: Deref<Target = DevRpcMiddleware<I>> + Send + Sync + Clone,
+    I: Middleware + Clone + 'static,
+    Ctx: DevRpcCtx<Client = M> + Send + Sync + Clone,
 {
     type Base = Ctx;
     fn new(base: Self::Base) -> Self {
         Self {
             snap_id: 0usize.into(),
             client: base.client(),
-            phantom: PhantomData,
         }
     }
     async fn before_each(&mut self) -> Result<()> {
