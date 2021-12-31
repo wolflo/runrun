@@ -2,7 +2,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use std::sync::Arc;
 
-use crate::ty::{tmap, ChildTypes, ChildTypesFn, Func, MapFn};
+use crate::ty::{tmap, ChildTypes, ChildTypesFn, TFn, MapFn};
 
 #[async_trait]
 pub trait DebugTrait {
@@ -61,7 +61,7 @@ where
     }
 }
 #[async_trait]
-impl<T, R, C> Func<T, C> for Driver<R>
+impl<T, R, C> TFn<T, C> for Driver<R>
 where
     T: Ctx<Base = C> + TestSet + ChildTypesFn + Send + Sync + Clone + 'static,
     R: Runner<Out = Result<()>> + Send + Sync,

@@ -5,7 +5,7 @@ use ethers::{
         DevRpcMiddleware, Http, Provider, SignerMiddleware, Wallet,
     },
     signers::{coins_bip39::English, MnemonicBuilder},
-    utils::{Ganache},
+    utils::Ganache,
 };
 use std::{convert::TryFrom, sync::Arc, time::Duration};
 
