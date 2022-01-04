@@ -295,19 +295,19 @@ where
 
 use anyhow::Result;
 use crate::core::{Runner, Driver};
-struct DBuilder<'a, R>{ runner: R, _ghost: PhantomData<&'a R>, }
-impl<'a, R, T, Args> FnTSync<T, Args> for DBuilder<'a, R>
-where
-    R: Runner<Out = Result<()>> + Send + Sync + Clone,
-    T: 'a,
-    Args: 'a,
-{
-    // type Out = &'a dyn FnT<T, Args, Out = ()>;
-    type Out = Driver<R>;
-    fn call(&self, args: Args) -> Self::Out {
-        Driver::new(self.runner.clone())
-    }
-}
+// struct DBuilder<'a, R>{ runner: R, _ghost: PhantomData<&'a R>, }
+// impl<'a, R, T, Args> FnTSync<T, Args> for DBuilder<'a, R>
+// where
+//     R: Runner<Out = Result<()>> + Send + Sync + Clone,
+//     T: 'a,
+//     Args: 'a,
+// {
+//     // type Out = &'a dyn FnT<T, Args, Out = ()>;
+//     type Out = Driver<R>;
+//     fn call(&self, args: Args) -> Self::Out {
+//         Driver::new(self.runner.clone())
+//     }
+// }
 
 // If we lift our TList to the trait level, can we store an &dyn TList? No, would
 // need to specify the associated type
