@@ -13,15 +13,14 @@ use std::{
     task::{Context, Poll},
 };
 
-use crate::{ty::{FnTMut, FnTSync, TMap, TCons, TNil, TailFn}, core::Ctx};
+use crate::{ty::{FnTMut, FnTSync, TMap, TCons, TNil, TailFn, HeadFn, Head}, core::Ctx};
 
 pub type AsyncOutput<Y> = Pin<Box<dyn Future<Output = Y> + Send>>;
 pub type AsyncFn<X, Y> = dyn Fn(X) -> AsyncOutput<Y> + Send + Sync;
 
 // pub trait Runner: Stream<Item = TestResult> {}
 pub trait TestSet<'a> {
-    // fn tests() -> &'a [&'a dyn Test<'a, Self>];
-    fn tests() -> &'a [Box<dyn Test<'a, Self>>];
+    fn tests() -> &'a [&'a dyn Test<'a, Self>];
 }
 
 struct Pre;
@@ -42,7 +41,7 @@ where
     type Item = S::Item;
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let hook_res = ready!(self.hook.run().poll_unpin(cx));
-        // If the hook failed propogate it as the test result
+        // If the hook failed, propogate it as the test result
         if matches!(hook_res.status, Status::Fail) {
             return Poll::Ready(Some(hook_res));
         }
@@ -106,12 +105,13 @@ where
     Self: Unpin,
     I: Iterator<Item = T> + 'a,
     T: Test<'a, Ctx> + Unpin + 'static,
+    Ctx: Clone,
 {
     type Item = TestRes<'a>;
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let next = self.tests.next();
         if let Some(t) = next {
-            let res = ready!(t.run(&self.ctx).poll_unpin(cx));
+            let res = ready!(t.run(self.ctx.clone()).poll_unpin(cx));
             Poll::Ready(Some(res))
         } else {
             Poll::Ready(None)
@@ -122,41 +122,69 @@ where
 // A DriverBuilder will impl FnTSync and map a Ctx type to a Driver of that test set.
 // A Driver will impl FnTMut, build the Ctx, turn the tests into a TestStream,
 // wrap that stream as needed (e.g. hooks), then consume the stream
-struct Driver;
-impl Driver {
-    pub fn new() -> Self { Self }
-}
-#[async_trait]
-impl<'a, T, Args> FnTMut<T, Args> for Driver
+// #[derive(Debug)]
+// struct Driver;
+// impl Driver {
+//     pub fn new() -> Self { Self }
+// }
+// #[async_trait]
+// impl<'a, T, Args> FnTMut<T, Args> for Driver
+// where
+//     T: Ctx<Base = Args> + TestSet<'static> + Unpin + Send + Sync + 'static,
+//     Args: Send + 'static,
+// {
+//     type Out = ();
+//     async fn call(&mut self, args: Args) -> Self::Out {
+//         let ctx = T::build(args).await;
+//         let tests = T::tests();
+        // let mut stream = TestStream::new(tests.iter(), ctx);
+        // while let Some(t) = stream.next().await {
+        //     println!("test: {:?}", t.trace);
+        // }
+    // }
+// }
+// #[derive(Debug, Clone)]
+// struct DriverBuilder;
+// impl<T> FnTSync<T, ()> for DriverBuilder {
+//     type Out = Driver;
+//     fn call(&self, _args: ()) -> Self::Out {
+//         Driver::new()
+//     }
+// }
+async fn runrun<T, Args>(args: Args) -> ()
 where
     T: Ctx<Base = Args> + TestSet<'static> + Unpin + Clone + Send + Sync + 'static,
-    Args: Send + 'static,
+    Args: Send + 'static
 {
-    type Out = ();
-    async fn call(&mut self, args: Args) -> Self::Out {
-        let ctx = T::build(args).await;
-        let tests = T::tests();
-        let mut stream = TestStream::new(tests.iter(), ctx);
-        while let Some(t) = stream.next().await {
-            println!("test: {:?}", t.trace);
-        }
+    let ctx = T::build(args).await;
+    let tests = T::tests();
+    let mut stream = TestStream::new(tests.iter(), ctx);
+    while let Some(t) = stream.next().await {
+        println!("test: {:?}", t.trace);
     }
 }
-struct DriverBuilder;
-impl<T> FnTSync<T, ()> for DriverBuilder {
-    type Out = Driver;
-    fn call(&self, _args: ()) -> Self::Out {
-        Driver::new()
+#[derive(Debug, Clone)]
+struct RunrunBuilder;
+impl<T, Args> FnTSync<T, ()> for RunrunBuilder
+where
+    T: Ctx<Base = Args> + TestSet<'static> + Unpin + Clone + Send + Sync + 'static,
+    Args: Send + 'static
+{
+    type Out = &'static AsyncFn<Args, ()>;
+    // Note that the builder args are different than the args passed to the generated fn
+    fn call(&self, _bargs: ()) -> Self::Out {
+        &|args| Box::pin(runrun::<T, Args>(args))
     }
 }
 
-#[derive(Clone, Copy)]
+
+#[derive(Debug, Clone, Copy)]
 pub enum Status {
     Pass,
     Fail,
     Skip,
 }
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct TestRes<'a> {
     pub status: Status,
     pub trace: &'a dyn Debug,
@@ -170,7 +198,7 @@ pub trait TestMut<'a> {
 }
 #[async_trait]
 pub trait Test<'a, Args>: Send + Sync {
-    async fn run(self, args: &Args) -> TestRes<'a>;
+    async fn run(&self, args: Args) -> TestRes<'a>;
     fn skip(&self) -> TestRes<'a> {
         TestRes::default()
     }
@@ -179,27 +207,28 @@ pub trait Test<'a, Args>: Send + Sync {
 impl<'a, T, E, Args> Test<'a, Args> for Result<T, E>
 where
     T: Test<'a, Args> + Send + Sync,
-    E: Into<&'a dyn Debug> + Send + Sync + 'a,
-    Args: Send + Sync,
+    E: Into<&'a dyn Debug> + Clone + Send + Sync + 'a,
+    // &'a E: Into<&'a dyn Debug>,
+    Args: Send + Sync + 'static,
 {
-    async fn run(self, args: &Args) -> TestRes<'a> {
+    async fn run(&self, args: Args) -> TestRes<'a> {
         match self {
             Ok(r) => r.run(args).await,
             Err(e) => TestRes {
                 status: Status::Fail,
-                trace: e.into(),
+                trace: (*e).clone().into(),
             },
         }
     }
 }
 #[async_trait]
-impl<'a, T, Args> Test<'a, Args> for &Box<T>
+impl<'a, T, Args> Test<'a, Args> for &T
 where
     T: Test<'a, Args> + ?Sized + Send + Sync,
-    Args: Sync,
+    Args: Send + Sync + 'static,
 {
-    async fn run(self, args: &Args) -> TestRes<'a> {
-        self.clone().run(args).await
+    async fn run(&self, args: Args) -> TestRes<'a> {
+        (**self).run(args).await
     }
     fn skip(&self) -> TestRes<'a> {
         (**self).skip()
@@ -220,105 +249,130 @@ impl Default for TestRes<'_> {
     }
 }
 
-// #[async_trait]
-// impl<'a, T, Args> Test<'a, Args> for &T
-// where
-//     T: Test<'a, Args> + ?Sized + Send + Sync,
-//     Args: Sync,
-// {
-//     async fn run(self, args: &Args) -> TestRes<'a> {
-//         self.run(args).await
-//     }
-// }
-// pub trait Sluice<I, Ctx> {
-//     fn new(iter: I, ctx: Ctx) -> Self;
-// }
-// pub struct Driver2<S> {
-//     pub stream: S,
-// }
-// impl<'a, S> Driver2<S>
-// where
-//     S: Stream<Item = TestRes<'a>>,
-//     // S: Sluice,
-// {
-//     async fn run_ctx<C>(&mut self, ctx: C)
-//     where
-//         C: TestSet<'a> + Unpin + Sync + 'static,
-//     {
-//         let tests = C::tests();
-//         let stream = Streamer::new(tests.iter(), ctx);
-//         // let stream = S::build(tests.iter(), ctx);
-//         let res: Vec<_> = stream.collect().await;
-//     }
-// }
-// Need something that given an initial state will generate a stream of streams of tests
-// struct Driver<'a, TList> {
-//     _tick: PhantomData<&'a TList>,
-// }
-// impl<'a, S> Stream for Driver<'a, S>
-// where
-//     Self: Unpin,
-// {
-//     type Item = &'a dyn Stream<Item = TestRes<'a>>;
-//     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-//         // Take1<>;
-//         Poll::Pending
-//     }
-// }
 
 // Need to combine MapFn and IntoIter impls to go from TList (types only) -> iterator
-// via mapping a function that acts on types + args
-pub trait TIter {
+// via mapping a function that acts on types + args. Should probably just impl
+// my own iterator, then a map from F, TList into that iterator.
+pub trait MapToIter<F, Args> {
     type Item;
     type IntoIter: Iterator;
-    fn into_iter(self) -> Self::IntoIter;
+    fn map_to_iter(f: F, args: Args) -> Self::IntoIter;
 }
-impl<F, Args, H, T> TIter for TMap<F, Args, TCons<H, T>>
+impl<F, Args, H, T> MapToIter<F, Args> for TCons<H, T>
+where
+    F: FnTSync<H, Args> + FnTSync<Head<T>, Args>,
+    T: MapToIter<F, Args, Item = <F as FnTSync<H, Args>>::Out> + HeadFn,
+    <T as MapToIter<F, Args>>::IntoIter: Iterator<Item = <F as FnTSync<H, Args>>::Out>,
+    Args: Send + Sync + Clone + 'static,
+{
+    type Item = <F as FnTSync<H, Args>>::Out;
+    type IntoIter =
+        iter::Chain<iter::Once<Self::Item>, <T as MapToIter<F, Args>>::IntoIter>;
+    fn map_to_iter(f: F, args: Args) -> Self::IntoIter {
+        let head = <F as FnTSync<H, Args>>::call(&f, args.clone());
+        let rest = <T as MapToIter<F, Args>>::map_to_iter(f, args);
+        iter::once(head).chain(rest)
+    }
+}
+impl <F, Args, H> MapToIter<F, Args> for TCons<H, TNil>
 where
     F: FnTSync<H, Args>,
-    T: TailFn,
-    TMap<F, Args, T>: IntoIterator<Item = F::Out>,
-    Args: Clone,
+    Args: Send + Sync + Clone + 'static,
 {
-    type Item = F::Out;
-    type IntoIter =
-        iter::Chain<iter::Once<Self::Item>, <TMap<F, Args, T> as IntoIterator>::IntoIter>;
-    fn into_iter(self) -> Self::IntoIter {
-        let node = <F as FnTSync<H, Args>>::call(&self.f, self.args.clone());
-        let rest = TMap {
-            lst: self.lst.tail(),
-            f: self.f,
-            args: self.args,
-        };
-        iter::once(node).chain(rest.into_iter())
+    type Item = <F as FnTSync<H, Args>>::Out;
+    type IntoIter = iter::Once<Self::Item>;
+    fn map_to_iter(f: F, args: Args) -> Self::IntoIter {
+        let head = <F as FnTSync<H, Args>>::call(&f, args.clone());
+        iter::once(head)
     }
 }
 #[cfg(test)]
 mod test {
     use super::*;
+    use anyhow::Result;
+    use linkme::distributed_slice;
     use crate::{TList, tlist};
 
-    struct Ctx0;
-    struct Ctx1;
+    #[derive(Debug, Clone)]
+    pub struct NullCtx;
+    #[derive(Debug, Clone)]
+    pub struct Ctx0;
+    #[derive(Debug, Clone)]
+    pub struct Ctx1;
     #[async_trait]
-    impl Ctx for Ctx0 { type Base = (); async fn build(_: Self::Base) -> Self { Self } }
+    impl Ctx for Ctx0 { type Base = NullCtx; async fn build(_: Self::Base) -> Self { println!("building 0"); Self } }
     #[async_trait]
-    impl Ctx for Ctx1 { type Base = Ctx0; async fn build(_: Self::Base) -> Self { Self } }
-    impl<'a> TestSet<'a> for Ctx0 {
-        fn tests() -> &'a [Box<dyn Test<'a, Self>>] {
-            &[]
+    impl Ctx for Ctx1 { type Base = NullCtx; async fn build(_: Self::Base) -> Self { println!("building 1"); Self } }
+
+    #[derive(Debug, Clone)]
+    struct UnitTest<F: Fn(Args) -> AsyncOutput<Out> + Send + Sync, Args: Clone + Send + Sync, Out: Send + Sync>(F, PhantomData<(Args, Out)>);
+    #[async_trait]
+    impl<'a, F, Args, Out> Test<'a, Args> for UnitTest<F, Args, Out>
+    where
+        F: Fn(Args) -> AsyncOutput<Out> + Send + Sync,
+        Args: Clone + Send + Sync,
+        Out: Send + Sync,
+    {
+        async fn run(&self, args: Args) -> TestRes<'a> {
+            (self.0)(args.clone());
+            TestRes::default()
         }
     }
-    impl<'a> TestSet<'a> for Ctx1 {
-        fn tests() -> &'a [Box<dyn Test<'a, Self>>] {
-            &[]
+    #[derive(Clone)]
+    pub struct TestCase<'a, T> {
+        pub name: &'static str,
+        pub test: &'a AsyncFn<T, Result<()>>,
+    }
+    #[async_trait]
+    impl<'a, Args> Test<'a, Args> for TestCase<'_, Args>
+    where
+        Args: Send + Sync + 'static,
+    {
+        async fn run(&self, args: Args) -> TestRes<'a> {
+            println!("{}", self.name);
+            (self.test)(args).await;
+            TestRes::default()
+        }
+    }
+    async fn test_01(_: Ctx0) -> Result<()> { println!("running test_01"); Ok(()) }
+    async fn test_11(_: Ctx1) -> Result<()> { println!("running test_11"); Ok(()) }
+
+    #[distributed_slice]
+    pub static TESTS_ON_CTX0: [&'static dyn Test<'static, Ctx0>] = [..];
+    #[distributed_slice(TESTS_ON_CTX0)]
+    pub static __T01: &dyn Test<Ctx0> = &TestCase { name: "test_01", test: &|x| Box::pin(test_01(x)) };
+    #[distributed_slice]
+    pub static TESTS_ON_CTX1: [&'static dyn Test<'static, Ctx1>] = [..];
+    #[distributed_slice(TESTS_ON_CTX1)]
+    pub static __T11: &dyn Test<Ctx1> = &TestCase { name: "test_11", test: &|x| Box::pin(test_11(x)) };
+
+    impl TestSet<'static> for Ctx0 {
+        fn tests() -> &'static [&'static dyn Test<'static, Self>] {
+            let _ = &UnitTest( |x| Box::pin(test_01(x)), PhantomData );
+            &TESTS_ON_CTX0
+        }
+    }
+    impl TestSet<'static> for Ctx1 {
+        fn tests() -> &'static [&'static dyn Test<'static, Self>] {
+            &TESTS_ON_CTX1
         }
     }
 
+    fn noop() {}
+    struct Unit;
+    impl<T, Args> FnTSync<T, Args> for Unit {
+        type Out = ();
+        fn call(&self, args: Args) -> Self::Out { }
+    }
 
+    // Can't just map the driver, need to map into a function pointer with a provided generic
     #[tokio::test]
     async fn test() {
-        // type Ctxs = tlist!(Ctx0, Ctx1);
-        let init_ctx = Ctx0::build(()).await;
+        type Ctxs = TList!(Ctx0, Ctx1);
+        let null = NullCtx;
+        let mut iter = <Ctxs as MapToIter<_, ()>>::map_to_iter(RunrunBuilder, ());
+        for f in iter {
+            f(null.clone()).await;
+        }
     }
 }
