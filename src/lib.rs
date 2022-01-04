@@ -1,3 +1,4 @@
+#![feature(generic_associated_types)]
 #![allow(dead_code)]
 
 pub mod core;
@@ -7,11 +8,6 @@ pub mod macros;
 pub mod stream;
 pub mod ty;
 
-pub use runrun_derive::*;
+mod exp;
 
-#[cfg(test)]
-mod tests {
-    async fn test() {
-        println!("lib test");
-    }
-}
+pub use runrun_derive::*;

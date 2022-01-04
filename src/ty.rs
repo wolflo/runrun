@@ -115,11 +115,11 @@ where
     }
 }
 
-// FnT is essentially FnMut with an additional generic parameter that is not included
+// FnTMut is essentially FnMut with an additional generic parameter that is not included
 // in the type signature of call().
-type Apply<F, Args, T> = <F as FnT<T, Args>>::Out;
+type Apply<F, Args, T> = <F as FnTMut<T, Args>>::Out;
 #[async_trait]
-pub trait FnT<T, Args> {
+pub trait FnTMut<T, Args> {
     type Out;
     async fn call(&mut self, args: Args) -> Self::Out;
 }
@@ -128,10 +128,12 @@ pub trait FnTSync<T, Args> {
     fn call(&self, args: Args) -> Self::Out;
 }
 
-struct TMap<F, Args, Lst> {
-    lst: Lst,
-    f: F,
-    args: Args,
+// Given a function that maps every element of a TList to the same type,
+// we can generate an iterator by mapping the function over the TList
+pub struct TMap<F, Args, Lst> {
+    pub lst: Lst,
+    pub f: F,
+    pub args: Args,
 }
 impl<F, Args, H, T> IntoIterator for TMap<F, Args, TCons<H, T>>
 where
@@ -181,7 +183,7 @@ where
 // of the function must be the same for all types.
 // If specialization were more advanced (specifically, if default associated
 // types were not treated as opaque types), we could use GATs to allow different
-// return types for the same FnT applied to different input types.
+// return types for the same FnTMut applied to different input types.
 type Map<F, Args, Lst> = <Lst as MapFn<F, Args>>::Out;
 pub async fn tmap<F, Args, Lst>(f: &mut F, args: Args) -> Map<F, Args, Lst>
 where
@@ -198,14 +200,14 @@ pub trait MapFn<F, Args> {
 impl<F, Args, H, T> MapFn<F, Args> for TCons<H, T>
 where
     T: MapFn<F, Args> + Elem + HeadFn,
-    F: FnT<H, Args> + FnT<Head<T>, Args> + Send + Sync,
+    F: FnTMut<H, Args> + FnTMut<Head<T>, Args> + Send + Sync,
     Args: Send + Sync + Clone + 'static,
     Apply<F, Args, H>: Send,
 {
     type Out = TCons<Apply<F, Args, H>, Map<F, Args, T>>;
     async fn map(f: &mut F, args: Args) -> Self::Out {
         TCons {
-            head: <F as FnT<H, Args>>::call(f, args.clone()).await,
+            head: <F as FnTMut<H, Args>>::call(f, args.clone()).await,
             tail: <T as MapFn<F, Args>>::map(f, args).await,
         }
     }
@@ -213,14 +215,14 @@ where
 #[async_trait]
 impl<F, Args, H> MapFn<F, Args> for TCons<H, TNil>
 where
-    F: FnT<H, Args> + Send,
+    F: FnTMut<H, Args> + Send,
     Args: Send + 'static,
     Apply<F, Args, H>: Send,
 {
     type Out = TCons<Apply<F, Args, H>, TNil>;
     async fn map(f: &mut F, args: Args) -> Self::Out {
         TCons {
-            head: <F as FnT<H, Args>>::call(f, args).await,
+            head: <F as FnTMut<H, Args>>::call(f, args).await,
             tail: TNil,
         }
     }
