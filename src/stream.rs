@@ -254,13 +254,11 @@ where
 {
     pub f: F,
     pub args: Args,
-    // pub next: fn(&mut Self) -> Option<<Self as Iterator>::Item>,
     pub next: fn(&mut Self) -> Option<F::Out>,
 }
 
 impl<F, Args, Lst> MapTSync<F, Args, Lst>
 where
-    Self: Iterator<Item = ApplySync<F, Args>>,
     F: BuilderTSync<Args>,
     Lst: ?Sized + MapNextSync<F, Args, Lst>,
 {
@@ -281,6 +279,19 @@ where
     pub f: F,
     pub args: Args,
     pub next: fn(&mut Self) -> Option<ApplyFut<F, Args>>,
+}
+impl<F, Args, Lst> MapT<F, Args, Lst>
+where
+    F: BuilderT<Args>,
+    Lst: ?Sized + MapNext<F, Args, Lst>,
+{
+    pub fn new(f: F, args: Args) -> Self {
+        Self {
+            f,
+            args,
+            next: <Lst as MapNext<F, Args, Lst>>::map_next,
+        }
+    }
 }
 // Implemented for the "original" list
 pub trait MapNext<F, Args, Lst>
@@ -519,6 +530,11 @@ mod test {
         dbg!(m.next());
         dbg!(m.next());
         dbg!(m.next());
+
+        let mut s = MapT::<_, _, Foo>::new(NoopBuilder, ());
+        dbg!(s.next().await);
+        dbg!(s.next().await);
+        dbg!(s.next().await);
 
         type Ctxs = TList!(Ctx0, Ctx1);
         let init_ctx = NullCtx;
