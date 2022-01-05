@@ -23,7 +23,9 @@ pub trait TestSet<'a> {
     fn tests() -> &'a [&'a dyn Test<'a, Self>];
 }
 
+#[derive(Debug, Clone, Copy)]
 struct Pre;
+#[derive(Debug, Clone, Copy)]
 struct Post;
 struct Hook<When, S, F, Ctx> {
     stream: S,
@@ -148,22 +150,16 @@ pub type App<F, Args> = <F as BuilderT<Args>>::Out;
 pub trait BuilderT<Args> {
     type Out;
     fn build<T>(&self, args: Args) -> Self::Out;
-    // type Out<T>;
-    // fn build<T>(args: Args) -> Self::Out<T>;
+}
+#[async_trait]
+pub trait BuilderTAsync<Args> {
+    type Out;
+    async fn build<T>(&self, args: Args) -> Self::Out;
 }
 #[derive(Clone)]
 pub struct FnBuilder<'a, X, Y> {
     f: &'a AsyncFn<X, Y>,
 }
-// impl<B, T, Args> FnTSync<T, Args> for B
-// where
-//     B: BuilderT<Args>
-// {
-//     type Out = B;
-//     fn call(&self, args: Args) -> Self::Out {
-//         B::build::<T>(args)
-//     }
-// }
 
 
 #[derive(Debug, Clone, Copy)]
@@ -239,161 +235,235 @@ impl Default for TestRes<'_> {
 // If I build my own iterator (stream) type, then can I map a TList into
 // it without evaluating the Ctx::build() methods?
 
-type Len<T> = <T as TList>::Len;
-pub trait TList {
-    type Len;
-    const LEN: usize;
-}
-impl<H, T> TList for TCons<H, T>
-where
-    T: TList,
-{
-    type Len = Succ<<T as TList>::Len>;
-    const LEN: usize = 1 + <T as TList>::LEN;
-}
-// Undefined for TNil
-type Nth<N, T> = <T as NthFn<N>>::Out;
-pub trait NthFn<N> {
-    type Out;
-}
-impl<H, T> NthFn<Zero> for TCons<H, T> {
-    type Out = H;
-}
-impl<N, H, T> NthFn<Succ<N>> for TCons<H, T> where T: NthFn<N> {
-    type Out = Nth<N, T>;
-}
+// type Len<T> = <T as TList>::Len;
+// pub trait TList {
+//     type Len;
+//     const LEN: usize;
+// }
+// impl TList for TNil {
+//     type Len = Zero;
+//     const LEN: usize = 0;
+// }
+// impl<H, T> TList for TCons<H, T>
+// where
+//     T: TList,
+// {
+//     type Len = Succ<<T as TList>::Len>;
+//     const LEN: usize = 1 + <T as TList>::LEN;
+// }
 
-// Instead of "storing" the next elem in generics of the fn, we store
-// it in generics of the trait, giving us more flexibility in type-level logic
-// pub type NthMap<N, F, T> = <T as NthMapFn<F, N>>::Out;
-// impld on the list? impld on the starting list, for defining the type of the mutable IterT arg
-// Lst is the current running list
-// pub type MapStore<F, Args, Lst, T> = <T as MapStoreFn<F, Args, Lst>>::Out;
+// Implemented for the "original" list
 pub trait MapStoreFn<F, Args, Lst>
 where
     Self: HeadFn,
     F: BuilderT<Args>,
-
+    Lst: ?Sized,
 {
-    fn map_store(it: &mut IterT<F, Args, Self>) -> Option<App<F, Args>>; // f is aka builder
+    fn map_store(iter: &mut MapT<F, Args, Self>) -> Option<App<F, Args>>;
 }
-// Self is the original list
 impl<F, Args, H, T> MapStoreFn<F, Args, TNil> for TCons<H, T>
 where
-    // Iter: Iterator<Item = F::Out<H>>,
-    F: BuilderT<Args>
+    F: BuilderT<Args>,
 {
-    // type Ret = F::Out<Self>;
-    fn map_store(it: &mut IterT<F, Args, Self>) -> Option<App<F, Args>> {
+    fn map_store(_iter: &mut MapT<F, Args, Self>) -> Option<App<F, Args>> {
         None
     }
 }
 impl<F, Args, H, T, S> MapStoreFn<F, Args, TCons<H, T>> for S
 where
-    // Lst: TailFn,
     F: BuilderT<Args>,
-    // S: MapStoreFn<F, Args, T> + HeadFn<Out = H>, // TODO: we def don't want this
-    S: MapStoreFn<F, Args, T>,
     Args: Clone,
+    S: MapStoreFn<F, Args, T>,
 {
-    // type Ret = F::Out<Self>;
-    fn map_store(it: &mut IterT<F, Args, Self>) -> Option<App<F, Args>> {
-        it.find = <Self as MapStoreFn<F, Args, T>>::map_store;
-        Some(F::build::<H>(&it.f, it.args.clone()))
+    fn map_store(iter: &mut MapT<F, Args, Self>) -> Option<App<F, Args>> {
+        iter.next = <Self as MapStoreFn<F, Args, T>>::map_store;
+        Some(F::build::<H>(&iter.f, iter.args.clone()))
     }
 }
-// impl<N, H, T> NthFn<N> for TCons<H, T>
-// where
-//     N: PredFn,
-//     T: NthFn<Pred<N>>,
-// {
-//     type Out = Nth<Pred<N>, T>;
-// }
-// impl<N, Lst> NthFn<Pred<N>> for Lst
-// where
-//     N: PredFn,
-//     Lst: NthFn<N>
-// {
-//     type Out = usize;
-// }
-
-// For all n, for all 0 <= x < n, if n is a valid index into a list, so is x
-
-// If I'm Valid, then my tail is valid
-// How to assert that every valid list eventually ends in TNil?
-pub trait Valid {}
-impl Valid for TNil {}
-impl<H, T> Valid for TCons<H, T> where T: Valid {}
-
-
-#[marker] pub trait InBounds<N> {}
-impl<N, H, T> InBounds<N> for TCons<H, T>
-where
-    N: PredFn,
-    T: InBounds<Pred<N>>
-{}
-impl<H, T> InBounds<Zero> for TCons<H, T> {}
-impl<H, T> InBounds<Succ<Zero>> for TCons<H, T> {}
-
-
-
-impl TList for TNil {
-    type Len = Zero;
-    const LEN: usize = 0;
-}
-pub trait Idx {
-    type Out;
-}
-pub struct IterT<F, Args, Lst> where Self: Iterator, Lst: ?Sized {
-    pub f: F,
-    pub find: fn(&mut Self) -> Option<<Self as Iterator>::Item>,
-    pub args: Args,
-}
-impl<F, Args, LST> IterT<F, Args, LST>
-where
-    Self: Iterator,
-    F: BuilderT<Args>,
-{
-    // we store an associated fn with the entire list,
-    // then next time through store an associated fn with the tail of that list
-    pub fn find<N, Lst>(&mut self) -> Option<<Self as Iterator>::Item>
-    where
-        N: PredFn,
-        Lst: NthFn<N> + TailFn + Valid,
-        // Tail<Lst>: NthFn<Pred<N>> + TailFn + Valid,
-    {
-        let item = (self.find)(self);
-        // self.find = IterT::find::<Succ<N>>;
-        // let _ = IterT::find::<Pred<N>, Tail<Lst>>;
-        // let x: Nth<Pred<Pred<N>>, Lst> = ();
-        // self.f.build::<Nth<N, Self>>();
-        // Nth should return TNil for N > Len, then impl BuilderT for TNil to return None
-        // <F as BuilderT<Args>>::build::<Nth<N, Lst>>(&self.f, self.args)();
-        todo!()
-    }
-}
-impl<F, Args, Lst> Iterator for IterT<F, Args, Lst>
+impl<F, Args, Lst> Iterator for MapT<F, Args, Lst>
     where
     F: BuilderT<Args>,
-    Lst: HeadFn + ?Sized,
+    Lst: ?Sized,
 {
     type Item = F::Out;
     fn next(&mut self) -> Option<Self::Item> {
-        // <F as BuilderT<Args>>::build::<Nth>(self.args);
-        // self.find::<usize>();
-        todo!()
+        (self.next)(self)
     }
 }
-// const fn len<Lst>() -> usize {
-// }
-// What if the iterator stored a fn that took a generic param and returned itself
-// with Succ<Param>?
-// struct TMap<F, Lst> {
-//     f: F, // builder
-// }
-// pub trait BuildIter<B, Args> {
-//     fn build_iter(builder: B, args: Args);
-// }
+
+pub struct MapT<F, Args, Lst> where Self: Iterator, Lst: ?Sized {
+    pub f: F,
+    pub args: Args,
+    pub next: fn(&mut Self) -> Option<<Self as Iterator>::Item>,
+}
+
+impl<F, Args, Lst> MapT<F, Args, Lst>
+where
+    Self: Iterator<Item = App<F, Args>>,
+    F: BuilderT<Args>,
+    Lst: ?Sized + MapStoreFn<F, Args, Lst>,
+{
+    pub fn new(f: F, args: Args) -> Self {
+        Self {
+            f,
+            args,
+            next: <Lst as MapStoreFn<F, Args, Lst>>::map_store,
+        }
+    }
+}
+
+
+// Same as the Iterator impl except:
+// - F is async, and the Stream Item is not the future but the resolved type.
+// - Need to propogate the None if out of items, else unwrap to get the future
+// - Need to poll the future and return it's result
+impl<F, Args, Res, Lst> Stream for MapT<F, Args, Lst>
+where
+    F: BuilderT<Args, Out = AsyncOutput<Res>> + Unpin,
+    Args: Unpin,
+    Lst: ?Sized,
+{
+    type Item = Res;
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let maybe_fut = (self.next)(self.get_mut());
+        match maybe_fut {
+            Some(mut fut) => {
+                let res = ready!(fut.poll_unpin(cx));
+                Poll::Ready(Some(res))
+            },
+            None => Poll::Ready(None),
+        }
+    }
+}
+
+
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use anyhow::Result;
+    use linkme::distributed_slice;
+    use crate::{TList, register_ctx};
+    use crate as runrun;
+
+    #[derive(Debug, Clone)]
+    pub struct NullCtx;
+    #[derive(Debug, Clone)]
+    pub struct Ctx0;
+    #[derive(Debug, Clone)]
+    pub struct Ctx1;
+    #[derive(Debug, Clone)]
+    pub struct Ctx2;
+    #[async_trait]
+    impl Ctx for Ctx0 { type Base = NullCtx; async fn build(_: Self::Base) -> Self { println!("building 0"); Self } }
+    #[async_trait]
+    impl Ctx for Ctx1 { type Base = NullCtx; async fn build(_: Self::Base) -> Self { println!("building 1"); Self } }
+    #[async_trait]
+    impl Ctx for Ctx2 { type Base = Ctx0; async fn build(_: Self::Base) -> Self { println!("building 2"); Self } }
+
+    #[derive(Clone)]
+    pub struct TestCase<'a, T> {
+        // pub name: &'static str,
+        pub name: &'static str,
+        pub test: &'a AsyncFn<T, Result<()>>,
+    }
+    #[async_trait]
+    impl<'a, Args> Test<'a, Args> for TestCase<'_, Args>
+    where
+        Args: Send + Sync + 'static,
+    {
+        async fn run(&self, args: Args) -> TestRes<'a> {
+            println!("{}", self.name);
+            let status = match (self.test)(args).await {
+                Ok(_) => Status::Pass,
+                _ => Status::Fail,
+            };
+            TestRes {
+                status,
+                trace: &"todo",
+            }
+        }
+    }
+    async fn test_01(_: Ctx0) -> Result<()> { println!("running test_01"); Ok(()) }
+    async fn test_02(_: Ctx0) -> Result<()> { println!("running test_02"); Ok(()) }
+    async fn test_11(_: Ctx1) -> Result<()> { println!("running test_11"); Ok(()) }
+    async fn test_21(_: Ctx2) -> Result<()> { println!("running test_21"); Ok(()) }
+
+    #[distributed_slice]
+    pub static TESTS_ON_CTX0: [&'static dyn Test<'static, Ctx0>] = [..];
+    #[distributed_slice(TESTS_ON_CTX0)]
+    pub static __T01: &dyn Test<Ctx0> = &TestCase { name: "test_01", test: &|x| Box::pin(test_01(x)) };
+    #[distributed_slice(TESTS_ON_CTX0)]
+    pub static __T02: &dyn Test<Ctx0> = &TestCase { name: "test_02", test: &|x| Box::pin(test_02(x)) };
+    #[distributed_slice]
+    pub static TESTS_ON_CTX1: [&'static dyn Test<'static, Ctx1>] = [..];
+    #[distributed_slice(TESTS_ON_CTX1)]
+    pub static __T11: &dyn Test<Ctx1> = &TestCase { name: "test_11", test: &|x| Box::pin(test_11(x)) };
+    #[distributed_slice]
+    pub static TESTS_ON_CTX2: [&'static dyn Test<'static, Ctx2>] = [..];
+    #[distributed_slice(TESTS_ON_CTX2)]
+    pub static __T21: &dyn Test<Ctx2> = &TestCase { name: "test_21", test: &|x| Box::pin(test_21(x)) };
+
+    impl TestSet<'static> for Ctx0 {
+        fn tests() -> &'static [&'static dyn Test<'static, Self>] {
+            &TESTS_ON_CTX0
+        }
+    }
+    impl TestSet<'static> for Ctx1 {
+        fn tests() -> &'static [&'static dyn Test<'static, Self>] {
+            &TESTS_ON_CTX1
+        }
+    }
+    impl TestSet<'static> for Ctx2 {
+        fn tests() -> &'static [&'static dyn Test<'static, Self>] {
+            &TESTS_ON_CTX2
+        }
+    }
+
+    fn noop() {}
+    struct Unit;
+    impl<T, Args> FnTSync<T, Args> for Unit {
+        type Out = ();
+        fn call(&self, args: Args) -> Self::Out { }
+    }
+
+    register_ctx!(NullCtx, [Ctx1, Ctx2]);
+    register_ctx!(Ctx0, [Ctx2]);
+
+    struct NoopBuilder;
+    impl BuilderT<()> for NoopBuilder {
+        type Out = usize;
+        fn build<T>(&self, _args: ()) -> Self::Out {
+            1
+        }
+    }
+    #[async_trait]
+    impl BuilderTAsync<()> for NoopBuilder {
+        type Out = usize;
+        async fn build<T>(&self, _args: ()) -> Self::Out {
+            2
+        }
+    }
+
+    // Can't just map the driver, need to map into a function pointer with a provided generic
+    #[tokio::test]
+    async fn test() {
+        // Get a stream of types from NullCtx:
+        type Foo = TList!(Ctx1, Ctx2);
+        let mut m = MapT::<_, _, Foo>::new(NoopBuilder, ());
+        dbg!(m.next());
+        dbg!(m.next());
+        dbg!(m.next());
+
+        type Ctxs = TList!(Ctx0, Ctx1);
+        let init_ctx = NullCtx;
+        let mut iter = <Ctxs as MapToIter<_, ()>>::map_to_iter(RunrunBuilder, ());
+        for f in iter {
+            f(init_ctx.clone()).await;
+        }
+    }
+}
+
 
 // Need to combine MapFn and IntoIter impls to go from TList (types only) -> iterator
 // via mapping a function that acts on types + args. Should probably just impl
@@ -429,96 +499,5 @@ where
     fn map_to_iter(f: F, args: Args) -> Self::IntoIter {
         let head = <F as FnTSync<H, Args>>::call(&f, args.clone());
         iter::once(head)
-    }
-}
-#[cfg(test)]
-mod test {
-    use super::*;
-    use anyhow::Result;
-    use linkme::distributed_slice;
-    use crate::{TList};
-
-    #[derive(Debug, Clone)]
-    pub struct NullCtx;
-    #[derive(Debug, Clone)]
-    pub struct Ctx0;
-    #[derive(Debug, Clone)]
-    pub struct Ctx1;
-    #[async_trait]
-    impl Ctx for Ctx0 { type Base = NullCtx; async fn build(_: Self::Base) -> Self { println!("building 0"); Self } }
-    #[async_trait]
-    impl Ctx for Ctx1 { type Base = NullCtx; async fn build(_: Self::Base) -> Self { println!("building 1"); Self } }
-
-    #[derive(Debug, Clone)]
-    struct UnitTest<F: Fn(Args) -> AsyncOutput<Out> + Send + Sync, Args: Clone + Send + Sync, Out: Send + Sync>(F, PhantomData<(Args, Out)>);
-    #[async_trait]
-    impl<'a, F, Args, Out> Test<'a, Args> for UnitTest<F, Args, Out>
-    where
-        F: Fn(Args) -> AsyncOutput<Out> + Send + Sync,
-        Args: Clone + Send + Sync,
-        Out: Send + Sync,
-    {
-        async fn run(&self, args: Args) -> TestRes<'a> {
-            (self.0)(args.clone());
-            TestRes::default()
-        }
-    }
-    #[derive(Clone)]
-    pub struct TestCase<'a, T> {
-        pub name: &'static str,
-        pub test: &'a AsyncFn<T, Result<()>>,
-    }
-    #[async_trait]
-    impl<'a, Args> Test<'a, Args> for TestCase<'_, Args>
-    where
-        Args: Send + Sync + 'static,
-    {
-        async fn run(&self, args: Args) -> TestRes<'a> {
-            println!("{}", self.name);
-            (self.test)(args).await;
-            TestRes::default()
-        }
-    }
-    async fn test_01(_: Ctx0) -> Result<()> { println!("running test_01"); Ok(()) }
-    async fn test_11(_: Ctx1) -> Result<()> { println!("running test_11"); Ok(()) }
-
-    #[distributed_slice]
-    pub static TESTS_ON_CTX0: [&'static dyn Test<'static, Ctx0>] = [..];
-    #[distributed_slice(TESTS_ON_CTX0)]
-    pub static __T01: &dyn Test<Ctx0> = &TestCase { name: "test_01", test: &|x| Box::pin(test_01(x)) };
-    #[distributed_slice]
-    pub static TESTS_ON_CTX1: [&'static dyn Test<'static, Ctx1>] = [..];
-    #[distributed_slice(TESTS_ON_CTX1)]
-    pub static __T11: &dyn Test<Ctx1> = &TestCase { name: "test_11", test: &|x| Box::pin(test_11(x)) };
-
-    impl TestSet<'static> for Ctx0 {
-        fn tests() -> &'static [&'static dyn Test<'static, Self>] {
-            let _ = &UnitTest( |x| Box::pin(test_01(x)), PhantomData );
-            &TESTS_ON_CTX0
-        }
-    }
-    impl TestSet<'static> for Ctx1 {
-        fn tests() -> &'static [&'static dyn Test<'static, Self>] {
-            &TESTS_ON_CTX1
-        }
-    }
-
-    fn noop() {}
-    struct Unit;
-    impl<T, Args> FnTSync<T, Args> for Unit {
-        type Out = ();
-        fn call(&self, args: Args) -> Self::Out { }
-    }
-
-    // Can't just map the driver, need to map into a function pointer with a provided generic
-    #[tokio::test]
-    async fn test() {
-        type Ctxs = TList!(Ctx0, Ctx1);
-        // let x: Nth<Succ<Succ<Zero>>, Ctxs> = ();
-        let null = NullCtx;
-        let mut iter = <Ctxs as MapToIter<_, ()>>::map_to_iter(RunrunBuilder, ());
-        for f in iter {
-            f(null.clone()).await;
-        }
     }
 }

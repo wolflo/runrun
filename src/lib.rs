@@ -1,5 +1,3 @@
-#![feature(generic_associated_types)]
-#![feature(marker_trait_attr)]
 #![allow(dead_code)]
 
 pub mod core;
