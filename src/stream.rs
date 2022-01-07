@@ -48,7 +48,7 @@ where
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let hook_res = ready!(self.hook.run().poll_unpin(cx));
         // If the hook failed, propogate it as the test result
-        if matches!(hook_res.status, Status::Fail) {
+        if let Status::Fail = hook_res.status {
             return Poll::Ready(Some(hook_res));
         }
         // Hook passed or skipped, so propogate the original stream
@@ -75,7 +75,7 @@ where
         }
         // TODO: skip this hook at times?
         let hook_res = ready!(self.hook.run().poll_unpin(cx));
-        if matches!(hook_res.status, Status::Fail) {
+        if let Status::Fail = hook_res.status {
             // test passed or skipped, but hook failed. Propogate hook result
             Poll::Ready(Some(hook_res))
         } else {
@@ -85,8 +85,10 @@ where
 }
 
 // TestStream takes an iterator over tests and returns a running stream
-// Filters will act on the input iterator before the TestStream turns
-// it into a Stream
+// Filters can act on the input iterator before the TestStream turns
+// it into a Stream.
+// TODO: split this into a starter and a runner to make it easier to
+// go between them?
 struct TestStream<'a, I, Ctx> {
     tests: I,
     ctx: Ctx,
@@ -125,17 +127,26 @@ where
     }
 }
 
+
 pub type ApplySync<F, Args> = <F as BuilderTSync<Args>>::Out;
 pub trait BuilderTSync<Args> {
     type Out;
     fn build<T>(&self, args: Args) -> Self::Out;
 }
+// pub trait BuilderTSync {
+//     type Out;
+//     fn build<T>(&self) -> Self::Out;
+// }
+// pub trait BuilderTSync<T> {
+//     type Out;
+//     fn build(&self) -> Self::Out;
+// }
 pub type Apply<F, Args> = <F as BuilderT<Args>>::Out;
 pub type ApplyFut<'a, F, Args> = AsyncOutputTick<'a, <F as BuilderT<Args>>::Out>;
 #[async_trait]
 pub trait BuilderT<Args> {
     type Out;
-    async fn build<T>(&self, args: Args) -> Self::Out;
+    async fn build<T: Ctx<Base=Args>>(&self, args: Args) -> Self::Out;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -153,14 +164,14 @@ pub struct TestRes<'a> {
 pub trait TestMut<'a> {
     async fn run(&mut self) -> TestRes<'a>;
     fn skip(&self) -> TestRes<'a> {
-        TestRes::default()
+        Default::default()
     }
 }
 #[async_trait]
 pub trait Test<'a, Args>: Send + Sync {
     async fn run(&self, args: Args) -> TestRes<'a>;
     fn skip(&self) -> TestRes<'a> {
-        TestRes::default()
+        Default::default()
     }
 }
 #[async_trait]
@@ -202,11 +213,78 @@ impl Default for Status {
 impl Default for TestRes<'_> {
     fn default() -> Self {
         Self {
-            status: Status::default(),
+            status: Default::default(),
             trace: &"",
         }
     }
 }
+
+// pub type ApplySync2<F, Args> = <F as BuilderTSync2<Args>>::Out;
+// pub trait BuilderTSync2<Args> {
+//     type Out;
+//     type El<T>;
+//     fn build2(&self, args: Args) -> Self::Out;
+// }
+// pub trait BuilderTGat<X, Args> {
+//     type Out<T>;
+//     fn build<T>(&self, args: Args) -> Self::Out<T>;
+// }
+// pub struct MapTSync2<F, Args, Lst>
+// where
+//     F: BuilderTSync2<Args>,
+//     Lst: ?Sized,
+// {
+//     pub f: F,
+//     pub args: Args,
+//     pub next: fn(&mut Self) -> Option<F::Out>,
+// }
+// pub trait MapNextSync2<T, F, Args, Lst>
+// where
+//     F: BuilderTSync2<Args>,
+//     Lst: ?Sized,
+// {
+//     fn map_next(iter: &mut MapTSync2<F, Args, Self>) -> Option<ApplySync2<F, Args>>;
+// }
+// impl<T, F, Args, X, XS> MapNextSync2<T, F, Args, TNil> for TCons<X, XS>
+// where
+//     F: BuilderTSync2<Args>,
+// {
+//     fn map_next(_iter: &mut MapTSync2<F, Args, Self>) -> Option<ApplySync2<F, Args>> {
+//         None
+//     }
+// }
+// impl<T, F, Args, X, XS, Me> MapNextSync2<T, F, Args, TCons<X, XS>> for Me
+// where
+//     Self: MapNextSync2<T, F, Args, XS>,
+//     F: BuilderTSync2<Args>,
+//     Args: Clone,
+// {
+//     fn map_next(iter: &mut MapTSync2<F, Args, Self>) -> Option<ApplySync2<F, Args>> {
+//         iter.next = <Self as MapNextSync2<T, F, Args, XS>>::map_next;
+//         Some(F::build2(&iter.f, iter.args.clone()))
+//     }
+// }
+//@wol
+// We can afford to have the original Lst bleed into the type sig for MapT (in fact,
+// its already there). What if BuilderT<Lst, Args> then build<T> just takes S<Z> etc.
+// We would have to impl BuilderT<Lst Args> where all elems in Lst impl BuilderTAux.
+// Damn, same problem as before though.
+// Basically, can we make a BuilderT that is impld for an entire list if it can act on
+// each element of that list?
+// impl<T, F, Args, Lst> Iterator for MapTSync2<F, Args, Lst>
+// where
+//     F: BuilderTSync2<T, Args>>,
+//     // F: BuilderTGat<T, Args>,
+//     Lst: ?Sized,
+// {
+//     type Item = F::Out;
+//     fn next(&mut self) -> Option<Self::Item> {
+//         (self.next)(self)
+//     }
+// }
+// where
+    // F: BuilderTSyncHiddenT<Args> for all T in Lst
+
 
 // Implemented for the "original" list
 pub trait MapNextSync<F, Args, Lst>
@@ -233,6 +311,22 @@ where
     fn map_next(iter: &mut MapTSync<F, Args, Self>) -> Option<ApplySync<F, Args>> {
         iter.next = <Self as MapNextSync<F, Args, T>>::map_next;
         Some(F::build::<H>(&iter.f, iter.args.clone()))
+        // F::<H>::build()
+        // where F<H>: BuilderTSync<Args>  --- GATs- F applied to H is a type that impls BuilderTSync<Args>
+            // F<T> -> X - impl BuilderTSync<Args> for X { fn do_build() { T::build(); }}
+            // F<U> -> Y - impl BuilderTSync<Args> for Y { fn do_build() { U::build(); }}
+            // so F<T> -> Builder1, F<U> -> Builder2
+            // Still can't map arbitrary functions over T and U though, I think
+            // What if do_build takes a generic fn?
+        // Different BuilderTSyncs should be different functions, all taking types
+            // of different domains as arguments
+        // F::Family<H, Args>::build();
+        // but can we restrict H in the Family impl? - don't think so
+        // We want to have functions from Type -> val, but we want them to be partial,
+        // may not be possibl
+        // re HKTs: This BuilderTSync<Args> that actually gives you a BuilderTSync<T, Args>
+        // allowing the caller? to specify T. Really we want the caller to be able to specify
+        // the trait bounds on each T in the TList they map over
     }
 }
 impl<F, Args, Lst> Iterator for MapTSync<F, Args, Lst>
@@ -246,6 +340,120 @@ where
     }
 }
 
+// If I stick with build<T>, I want the builder of MapT to be able to specify trait bounds
+// on that T, which every element of Lst must meet.
+// We need to say that forall T in Lst, F is implemented / can operate on T
+// T needs to remain unspecified because it is only determined when each element of the TList
+// is reached by the iterator. So we have a type that must remain unspecified by F/BuilderT,
+// But the creator of the BuilderT knows some bounds that it needs to meet (e.g. T must be a pointer/Arc/Rc).
+// We're thinking about this in the wrong way. The "caller" is the iterator calling F with
+// T. So instead of moving T into the build<T>() method, what can we do?
+// So when we create a BuilderT, we don't yet know what T we want to use (bc it's given to us
+// during iteration), but we know it must meet some trait bounds.
+// A BuilderT is something that can build X from a T, but we don't yet know which T, so we can't call
+// it a BuilderT<T>.
+// HKTs allow you to split up a type - you decide one part of the type in one place, and another part of
+// type in another place. We want to decide the trait bounds on a type in one place, and the type itself in
+// another place. Can we do this?
+// trait Trait<'a> {}
+// trait Foo where for<'a> Self::Assoc<'a>: Trait<'a> {
+//     type Assoc<'a>;
+// }
+// This could work. Would need to impl any trait we're interested
+// for the list itself if all elements impl though?
+#[marker] trait Elem<Lst> {}
+impl<H, T> Elem<TCons<H, T>> for H {}
+impl<X, H, T> Elem<TCons<H, T>> for X where X: Elem<T> {}
+
+// trait F<Lst> where for<T: Elem<Lst>> Self::Assoc<T>: ... {}
+trait F<Lst> {
+    // Associated type must impl Trait<T> for all T in Lst
+    type Assoc<T: Elem<Lst>>: Trait<T>;
+    // type Assoc<T: Debug>: Trait<T>;
+}
+struct Builder1; struct Builder2;
+impl<T>  Trait<T> for Builder1 where T: Mark {}
+type L = crate::TList!(String, usize);
+type L2 = crate::TList!(String, u8);
+// impl Mark for String {} impl Mark for u8 {}
+impl F<L2> for Builder1 {
+    type Assoc<T: Elem<L2>> = Builder1;
+    // type Assoc<T: Mark> = Builder1;
+}
+pub trait Mark {}
+impl<T> Mark for T where T: Elem<L2> {}
+// impl<T> Mark for T where T: Elem<L> {}
+
+
+fn elem<T, Lst>() where T: Elem<Lst> {}
+fn test_elem() {
+    type X = crate::TList!(String, usize);
+    elem::<String, X>();
+    // elem::<u8, X>();
+}
+
+trait BuilderTest {}
+trait BuilderTestAux {}
+impl<H, T> BuilderTest for TCons<H, T> where H: BuilderTestAux, T: BuilderTest {}
+impl BuilderTest for TNil {}
+
+
+
+
+trait Trait<T> {}
+struct F1; struct F2;
+impl<T> Trait<T> for F1 where T: Debug {}
+impl<T> Trait<T> for F2 where T: Default {}
+trait Foo {
+    type Assoc<T>: Trait<T>;
+}
+
+trait Func<T> { type Out; fn foo(); }
+
+struct Error;
+// but we still can't restrict T outside of this fn.
+fn call_fn<T, Builder>() {
+    // Builder::run<T>();
+    // Builder::This<T>::run();
+}
+fn call_fn2<T, F>(f: F) {
+    // f::<T>();
+}
+
+// How would I say "for all T in TList, T impls trait X"?
+// impl<T> Func<T> for Builder1 where T: !Debug { }
+// passing trait bounds around is the same as Will's higher-order type functions,
+// bc he thinks of traits as functions on types. This means we need specialization?
+// impl<T> Func<T> for Builder2 where T: Default {
+//     type Out = usize;
+//     fn foo() { let t = T::default(); }
+// }
+trait Foo2 {
+    type Assoc<T: Debug>: Func<T>;
+}
+struct Type;
+// impl Foo2 for Type {
+//     type Assoc<T> = <Builder1 as Func<T>>::Out;
+// }
+#[derive(Debug)]
+struct Type2;
+struct Baz<P: Foo2> {
+    x: P::Assoc<Type2>,
+}
+// fn boo2() {
+//     let x: Baz<
+// }
+// so Func<T> is our BuilderT. What's Foo?
+// trait Foo where for<T> Self::Assoc<T>: Trait<T> {
+//     type Assoc<T>;
+// }
+
+// A RcPtr is something that wraps a given T, but we don't yet know which T, so we can't call it a RcPtr<T>.
+// struct FnOnCtxs<T: RcPtr> {
+//     _: T<>,
+// }
+// gat means caller decides whether to give me a BuilderT<T, ..> or a BuilderT<U ...>?
+// But BuilderT is a trait not a type
 // pub struct MapTSync<F, Args, Lst> where Self: Iterator, Lst: ?Sized {
 pub struct MapTSync<F, Args, Lst>
 where
@@ -296,7 +504,6 @@ where
 // Implemented for the "original" list
 pub trait MapNext<F, Args, Lst>
 where
-    Self: HeadFn,
     F: BuilderT<Args>,
     Lst: ?Sized,
 {
@@ -315,7 +522,7 @@ where
     Self: MapNext<F, Args, T>,
     F: BuilderT<Args>,
     Args: Clone,
-    H: 'static,
+    H: 'static + Ctx<Base = Args>,
 {
     fn map_next(iter: &mut MapT<F, Args, Self>) -> Option<ApplyFut<F, Args>> {
         iter.next = <Self as MapNext<F, Args, T>>::map_next;
@@ -323,13 +530,6 @@ where
     }
 }
 
-// Why does the Sync version work and this doesn't?
-// May need to restructure such that the mutation of self happens synchronously, then the future
-// doesn't need to capture mut self.
-// The mutation is sync, they are just tied together by some generic trickiness.
-// The future is created when build() is called, but we can just pass build::<H> back from
-// map_next, then the mutable borrow is over and we can pass in iter.f, iter.args to the fut
-// https://rust-lang.github.io/rfcs/2394-async_await.html#lifetime-capture-in-the-anonymous-future
 impl<F, Args, Lst> Stream for MapT<F, Args, Lst>
 where
     F: BuilderT<Args> + Unpin,
@@ -349,28 +549,83 @@ where
     }
 }
 
+// what if the T itself impls the Driver fn, and I just tell MapT which
+// Trait fn to try to use? This is higher-order traits again though
+// impl Trait for T where T: Ctx {
+//     fn build() {
+//         let ctx = Self::build()
+//     }
+// }
+
+pub struct Driver;
+#[async_trait]
+impl<Args> BuilderT<Args> for Driver
+where
+    Args: Send + 'static,
+{
+    type Out = ();
+    async fn build<T: Ctx<Base=Args>>(&self, args: Args) -> Self::Out {
+        let ctx = T::build(args);
+        // let tests = T::Tests();
+        todo!()
+    }
+}
+
+// How would I define a function for which each type P has a different, possibly overlapping domain?
+// I can't do this because T ends up either bleeding into the type of MapT or being unconstrained. Why is this?
+// P::act(t) t element of Dom(P)
+// Q::act(t) t element of Dom(Q)
+// trait Foo {} trait Bar {} trait Baz{}
+// trait Trait<T> { fn act(t: T); }
+// struct P; struct Q;
+// impl<T> Trait<T> for P where T: Foo { fn act(t: T) {}}
+// impl<T> Trait<T> for Q where T: Bar { fn act(t: T) {}}
+
+// (overlapping impls)
+// struct Op<T>(PhantomData<T>);
+// impl<T> Foo for Op<T> where T: Bar {}
+// impl<U> Foo for Op<U> where T: Baz {}
+// self.next is an associated fn so that it can have diff behavior for diff input types
+fn foo<T>() where T: Default {
+    let x: T = Default::default();
+    let x: fn() -> T = Default::default;
+    boo(x);
+}
+fn boo<T>(f: fn() -> T) {
+    f();
+    // Want to be able to pass a type arg to an arbitrary function, but can't do
+    // f<T>();
+    // Can make f a trait associated fn, then we know the "pointer" takes a gen param.
+    // But the we can't set our own bounds on the generic param for each trait impl
+    // Can I do this with type families?
+    // Imagine if I wanted to be generic over Arc<i32>, Rc<i32>, but only Rc should be able to be instantiated for u32
+}
+// https://users.rust-lang.org/t/emulating-type-families-with-relational-traits/29463
+// impl Builder<Lst: TList, N: Nat> for ...
+// What about generating an enum for each list, then matching on the element discrimant
+
+
 // Same as the Iterator impl except:
 // - F is async, and the Stream Item is not the future but the resolved type.
 // - Need to propogate the None if out of items, else unwrap to get the future
 // - Need to poll the future and return it's result
-impl<F, Args, Res, Lst> Stream for MapTSync<F, Args, Lst>
-where
-    F: BuilderTSync<Args, Out = AsyncOutput<Res>> + Unpin,
-    Args: Unpin,
-    Lst: ?Sized,
-{
-    type Item = Res;
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let maybe_fut = (self.next)(self.get_mut());
-        match maybe_fut {
-            Some(mut fut) => {
-                let res = ready!(fut.poll_unpin(cx));
-                Poll::Ready(Some(res))
-            }
-            None => Poll::Ready(None),
-        }
-    }
-}
+// impl<F, Args, Res, Lst> Stream for MapTSync<F, Args, Lst>
+// where
+//     F: BuilderTSync<Args, Out = AsyncOutput<Res>> + Unpin,
+//     Args: Unpin,
+//     Lst: ?Sized,
+// {
+//     type Item = Res;
+//     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+//         let maybe_fut = (self.next)(self.get_mut());
+//         if let Some(mut fut) = maybe_fut {
+//             let res = ready!(fut.poll_unpin(cx));
+//             Poll::Ready(Some(res))
+//         } else {
+//             Poll::Ready(None)
+//         }
+//     }
+// }
 
 #[cfg(test)]
 mod test {
@@ -536,12 +791,12 @@ mod test {
         dbg!(s.next().await);
         dbg!(s.next().await);
 
-        type Ctxs = TList!(Ctx0, Ctx1);
-        let init_ctx = NullCtx;
-        let mut iter = <Ctxs as MapToIter<_, ()>>::map_to_iter(RunrunBuilder, ());
-        for f in iter {
-            f(init_ctx.clone()).await;
-        }
+        // type Ctxs = TList!(Ctx0, Ctx1);
+        // let init_ctx = NullCtx;
+        // let mut iter = <Ctxs as MapToIter<_, ()>>::map_to_iter(RunrunBuilder, ());
+        // for f in iter {
+        //     f(init_ctx.clone()).await;
+        // }
     }
 }
 
@@ -613,19 +868,19 @@ where
         println!("test: {:?}", t.trace);
     }
 }
-#[derive(Debug, Clone)]
-struct RunrunBuilder;
-impl<T, Args> FnTSync<T, ()> for RunrunBuilder
-where
-    T: Ctx<Base = Args> + TestSet<'static> + Unpin + Clone + Send + Sync + 'static,
-    Args: Send + 'static,
-{
-    type Out = &'static AsyncFn<Args, ()>;
-    // Note that the builder args are different than the args passed to the generated fn
-    fn call(&self, _bargs: ()) -> Self::Out {
-        &|args| Box::pin(runrun::<T, Args>(args))
-    }
-}
+// #[derive(Debug, Clone)]
+// struct RunrunBuilder;
+// impl<T, Args> FnTSync<T, ()> for RunrunBuilder
+// where
+//     T: Ctx<Base = Args> + TestSet<'static> + Unpin + Clone + Send + Sync + 'static,
+//     Args: Send + 'static,
+// {
+//     type Out = &'static AsyncFn<Args, ()>;
+//     // Note that the builder args are different than the args passed to the generated fn
+//     fn call(&self, _bargs: ()) -> Self::Out {
+//         &|args| Box::pin(runrun::<T, Args>(args))
+//     }
+// }
 
 ///// MapT async impl
 // pub struct MapT<'s, F, Args, Lst>

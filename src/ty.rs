@@ -9,7 +9,9 @@ pub struct Succ<N>(PhantomData<N>);
 pub type One = Succ<Zero>;
 
 // Type-level cons list
+#[derive(Debug)]
 pub struct TNil;
+#[derive(Debug)]
 pub struct TCons<H, T> {
     pub head: H,
     pub tail: T,
