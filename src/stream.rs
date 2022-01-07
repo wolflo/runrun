@@ -137,20 +137,31 @@ pub trait BuilderTSync<Args> {
 }
 pub type Apply<F, Args> = <F as BuilderT<Args>>::Out;
 pub type ApplyFut<'a, F, Args> = AsyncOutputTick<'a, <F as BuilderT<Args>>::Out>;
+
+pub trait MapBounds<Args>:
+    Ctx<Base = Args> + TestSet<'static> + ChildTypesFn + Unpin + Clone + Send + Sync + 'static
+{
+}
+impl<T, Args> MapBounds<Args> for T where
+    T: Ctx<Base = Args> + TestSet<'static> + ChildTypesFn + Unpin + Clone + Send + Sync + 'static
+{
+}
+
 #[async_trait]
 pub trait BuilderT<Args>: Sized {
     type Out;
     async fn build<T>(&self, args: Args) -> <Self as BuilderT<Args>>::Out
     where
         Self: BuilderT<T>,
-        T: Ctx<Base = Args>
-            + TestSet<'static>
-            + ChildTypesFn
-            + Unpin
-            + Clone
-            + Send
-            + Sync
-            + 'static,
+        T: MapBounds<Args>,
+        // T: Ctx<Base = Args>
+        //     + TestSet<'static>
+        //     + ChildTypesFn
+        //     + Unpin
+        //     + Clone
+        //     + Send
+        //     + Sync
+        //     + 'static,
         ChildTypes<T>: MapNext<Self, T, ChildTypes<T>>;
 }
 
@@ -398,7 +409,6 @@ where
 fn test_elem() {
     type X = crate::TList!(String, usize);
     elem::<String, X>();
-    // elem::<u8, X>();
 }
 
 trait BuilderTest {}
@@ -470,6 +480,94 @@ struct Baz<P: Foo2> {
 // gat means caller decides whether to give me a BuilderT<T, ..> or a BuilderT<U ...>?
 // But BuilderT is a trait not a type
 // pub struct MapTSync<F, Args, Lst> where Self: Iterator, Lst: ?Sized {
+
+pub type StreamItem<T> = <T as Stream>::Item;
+pub trait Next<'a, F, Args> {
+    type Map: Stream;
+    fn next(&self, map: &mut Self::Map) -> StreamItem<Self::Map>;
+}
+// F: FnTMut
+pub struct MapTExp<'a, F, Args, Lst> {
+    pub f: F,
+    pub args: Args,
+    pub next: &'a dyn Next<'a, F, Args, Map = Self>,
+}
+pub trait MapAll<Args, Lst> {}
+impl<F, Args> MapAll<Args, TNil> for F {}
+impl<Args, F, H, T> MapAll<Args, TCons<H, T>> for F where F: FnTMut<H, Args> + MapAll<Args, T> {}
+impl<'a, F, Args, Lst> Stream for MapTExp<'a, F, Args, Lst>
+where
+    F: MapAll<Args, Lst> + FnTMut<Head<Lst>, Args> + Unpin,
+    Args: Unpin + Clone,
+    Lst: HeadFn,
+{
+    type Item = F::Out;
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let args = self.args.clone();
+        let mut fut = self.get_mut().f.call(args);
+        let out = ready!(fut.poll_unpin(cx));
+        Poll::Ready(Some(out))
+    }
+}
+pub trait U<const N: usize> {
+    type Nat;
+}
+pub struct Converter;
+impl U<0> for Converter {
+    type Nat = Zero;
+}
+impl U<1> for Converter {
+    type Nat = Succ<Zero>;
+}
+impl U<2> for Converter {
+    type Nat = Succ<Succ<Zero>>;
+}
+pub trait Nat {
+    const N: usize;
+}
+impl Nat for Zero {
+    const N: usize = 0;
+}
+impl<Pred: Nat> Nat for Succ<Pred> {
+    const N: usize = 1 + Pred::N;
+}
+
+pub fn take_type<T>() {
+    println!("take type");
+}
+pub enum FooFoo {
+    Foo1,
+    Foo2,
+}
+pub trait X {
+    type Out;
+}
+pub fn take<T>(x: usize) {
+    match x {
+        1 => println!("1"),
+        2 => println!("2"),
+        _ => panic!(""),
+    }
+}
+// pub trait Bat<const N: usize>: HeadFn + TailFn
+// where
+//     Tail<Self>: Bat<{N - 1}>,
+//     Tail<Tail<Self>>: Bat<{N - 2}>,
+//     [(); {N - 1}]: Sized,
+// {}
+// pub trait InBoundsSuper<N>: TailFn where N: PredFn, Tail<Self>: InBoundsSuper<Pred<N>> {}
+// pub trait InBounds<N> {}
+// impl<Lst> InBounds<Zero> for Lst {}
+// impl<N, Lst> InBounds<N> for Lst where Lst: TailFn, N: PredFn, Tail<Lst>: InBounds<Pred<N>> {}
+// pub fn map<Lst, N>() where Lst: HeadFn + TailFn + InBounds<N>, N: PredFn {
+//     take_type::<Head<Lst>>();
+//     map::<Tail<Lst>, Pred<N>>();
+// }
+// pub fn map<Lst, const N: usize>() where Lst: HeadFn + TailFn, Tail<Lst>: HeadFn + TailFn {
+//     take_type::<Head<Lst>>();
+//     map::<Tail<Lst>, {N - 1}>();
+// }
+
 pub struct MapTSync<F, Args, Lst>
 where
     F: BuilderTSync<Args>,
@@ -545,7 +643,8 @@ where
     Self: MapNext<F, Args, T>,
     F: BuilderT<Args> + BuilderT<H>,
     Args: Clone,
-    H: Ctx<Base = Args> + TestSet<'static> + ChildTypesFn + Unpin + Clone + Send + Sync + 'static,
+    // H: Ctx<Base = Args> + TestSet<'static> + ChildTypesFn + Unpin + Clone + Send + Sync + 'static,
+    H: MapBounds<Args>,
     ChildTypes<H>: MapNext<F, H, ChildTypes<H>>,
 {
     fn map_next(iter: &mut MapT<F, Args, Self>) -> Option<ApplyFut<F, Args>> {
@@ -583,14 +682,15 @@ where
     async fn build<T>(&self, args: Args) -> Self::Out
     where
         Self: BuilderT<T>,
-        T: Ctx<Base = Args>
-            + TestSet<'static>
-            + ChildTypesFn
-            + Unpin
-            + Clone
-            + Send
-            + Sync
-            + 'static,
+        T: MapBounds<Args>,
+        // T: Ctx<Base = Args>
+        //     + TestSet<'static>
+        //     + ChildTypesFn
+        //     + Unpin
+        //     + Clone
+        //     + Send
+        //     + Sync
+        //     + 'static,
         ChildTypes<T>: MapNext<Self, T, ChildTypes<T>>,
     {
         let ctx = T::build(args).await;
