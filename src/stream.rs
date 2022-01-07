@@ -15,7 +15,10 @@ use std::{
 
 use crate::{
     core::Ctx,
-    ty::{FnTMut, FnTSync, Head, HeadFn, Pred, PredFn, Succ, TCons, TNil, Tail, TailFn, Zero},
+    ty::{
+        ChildTypes, ChildTypesFn, FnTMut, FnTSync, Head, HeadFn, Pred, PredFn, Succ, TCons, TNil,
+        Tail, TailFn, Zero,
+    },
 };
 
 pub type AsyncOutput<Y> = Pin<Box<dyn Future<Output = Y> + Send>>;
@@ -127,26 +130,28 @@ where
     }
 }
 
-
 pub type ApplySync<F, Args> = <F as BuilderTSync<Args>>::Out;
 pub trait BuilderTSync<Args> {
     type Out;
     fn build<T>(&self, args: Args) -> Self::Out;
 }
-// pub trait BuilderTSync {
-//     type Out;
-//     fn build<T>(&self) -> Self::Out;
-// }
-// pub trait BuilderTSync<T> {
-//     type Out;
-//     fn build(&self) -> Self::Out;
-// }
 pub type Apply<F, Args> = <F as BuilderT<Args>>::Out;
 pub type ApplyFut<'a, F, Args> = AsyncOutputTick<'a, <F as BuilderT<Args>>::Out>;
 #[async_trait]
-pub trait BuilderT<Args> {
+pub trait BuilderT<Args>: Sized {
     type Out;
-    async fn build<T: Ctx<Base=Args>>(&self, args: Args) -> Self::Out;
+    async fn build<T>(&self, args: Args) -> <Self as BuilderT<Args>>::Out
+    where
+        Self: BuilderT<T>,
+        T: Ctx<Base = Args>
+            + TestSet<'static>
+            + ChildTypesFn
+            + Unpin
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+        ChildTypes<T>: MapNext<Self, T, ChildTypes<T>>;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -283,8 +288,7 @@ impl Default for TestRes<'_> {
 //     }
 // }
 // where
-    // F: BuilderTSyncHiddenT<Args> for all T in Lst
-
+// F: BuilderTSyncHiddenT<Args> for all T in Lst
 
 // Implemented for the "original" list
 pub trait MapNextSync<F, Args, Lst>
@@ -313,13 +317,13 @@ where
         Some(F::build::<H>(&iter.f, iter.args.clone()))
         // F::<H>::build()
         // where F<H>: BuilderTSync<Args>  --- GATs- F applied to H is a type that impls BuilderTSync<Args>
-            // F<T> -> X - impl BuilderTSync<Args> for X { fn do_build() { T::build(); }}
-            // F<U> -> Y - impl BuilderTSync<Args> for Y { fn do_build() { U::build(); }}
-            // so F<T> -> Builder1, F<U> -> Builder2
-            // Still can't map arbitrary functions over T and U though, I think
-            // What if do_build takes a generic fn?
+        // F<T> -> X - impl BuilderTSync<Args> for X { fn do_build() { T::build(); }}
+        // F<U> -> Y - impl BuilderTSync<Args> for Y { fn do_build() { U::build(); }}
+        // so F<T> -> Builder1, F<U> -> Builder2
+        // Still can't map arbitrary functions over T and U though, I think
+        // What if do_build takes a generic fn?
         // Different BuilderTSyncs should be different functions, all taking types
-            // of different domains as arguments
+        // of different domains as arguments
         // F::Family<H, Args>::build();
         // but can we restrict H in the Family impl? - don't think so
         // We want to have functions from Type -> val, but we want them to be partial,
@@ -361,7 +365,8 @@ where
 // }
 // This could work. Would need to impl any trait we're interested
 // for the list itself if all elements impl though?
-#[marker] trait Elem<Lst> {}
+#[marker]
+trait Elem<Lst> {}
 impl<H, T> Elem<TCons<H, T>> for H {}
 impl<X, H, T> Elem<TCons<H, T>> for X where X: Elem<T> {}
 
@@ -371,8 +376,9 @@ trait F<Lst> {
     type Assoc<T: Elem<Lst>>: Trait<T>;
     // type Assoc<T: Debug>: Trait<T>;
 }
-struct Builder1; struct Builder2;
-impl<T>  Trait<T> for Builder1 where T: Mark {}
+struct Builder1;
+struct Builder2;
+impl<T> Trait<T> for Builder1 where T: Mark {}
 type L = crate::TList!(String, usize);
 type L2 = crate::TList!(String, u8);
 // impl Mark for String {} impl Mark for u8 {}
@@ -384,8 +390,11 @@ pub trait Mark {}
 impl<T> Mark for T where T: Elem<L2> {}
 // impl<T> Mark for T where T: Elem<L> {}
 
-
-fn elem<T, Lst>() where T: Elem<Lst> {}
+fn elem<T, Lst>()
+where
+    T: Elem<Lst>,
+{
+}
 fn test_elem() {
     type X = crate::TList!(String, usize);
     elem::<String, X>();
@@ -394,21 +403,27 @@ fn test_elem() {
 
 trait BuilderTest {}
 trait BuilderTestAux {}
-impl<H, T> BuilderTest for TCons<H, T> where H: BuilderTestAux, T: BuilderTest {}
+impl<H, T> BuilderTest for TCons<H, T>
+where
+    H: BuilderTestAux,
+    T: BuilderTest,
+{
+}
 impl BuilderTest for TNil {}
 
-
-
-
 trait Trait<T> {}
-struct F1; struct F2;
+struct F1;
+struct F2;
 impl<T> Trait<T> for F1 where T: Debug {}
 impl<T> Trait<T> for F2 where T: Default {}
 trait Foo {
     type Assoc<T>: Trait<T>;
 }
 
-trait Func<T> { type Out; fn foo(); }
+trait Func<T> {
+    type Out;
+    fn foo();
+}
 
 struct Error;
 // but we still can't restrict T outside of this fn.
@@ -517,12 +532,21 @@ where
         None
     }
 }
-impl<F, Args, H, T, Me> MapNext<F, Args, TCons<H, T>> for Me
+impl<F, Args> MapNext<F, Args, TNil> for TNil
+where
+    F: BuilderT<Args>,
+{
+    fn map_next(_iter: &mut MapT<F, Args, Self>) -> Option<ApplyFut<F, Args>> {
+        None
+    }
+}
+impl<'a, F, Args, H, T, Lst> MapNext<F, Args, TCons<H, T>> for Lst
 where
     Self: MapNext<F, Args, T>,
-    F: BuilderT<Args>,
+    F: BuilderT<Args> + BuilderT<H>,
     Args: Clone,
-    H: 'static + Ctx<Base = Args>,
+    H: Ctx<Base = Args> + TestSet<'static> + ChildTypesFn + Unpin + Clone + Send + Sync + 'static,
+    ChildTypes<H>: MapNext<F, H, ChildTypes<H>>,
 {
     fn map_next(iter: &mut MapT<F, Args, Self>) -> Option<ApplyFut<F, Args>> {
         iter.next = <Self as MapNext<F, Args, T>>::map_next;
@@ -549,25 +573,37 @@ where
     }
 }
 
-// what if the T itself impls the Driver fn, and I just tell MapT which
-// Trait fn to try to use? This is higher-order traits again though
-// impl Trait for T where T: Ctx {
-//     fn build() {
-//         let ctx = Self::build()
-//     }
-// }
-
-pub struct Driver;
+pub struct Runner;
 #[async_trait]
-impl<Args> BuilderT<Args> for Driver
+impl<Args> BuilderT<Args> for Runner
 where
     Args: Send + 'static,
 {
     type Out = ();
-    async fn build<T: Ctx<Base=Args>>(&self, args: Args) -> Self::Out {
-        let ctx = T::build(args);
-        // let tests = T::Tests();
-        todo!()
+    async fn build<T>(&self, args: Args) -> Self::Out
+    where
+        Self: BuilderT<T>,
+        T: Ctx<Base = Args>
+            + TestSet<'static>
+            + ChildTypesFn
+            + Unpin
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+        ChildTypes<T>: MapNext<Self, T, ChildTypes<T>>,
+    {
+        let ctx = T::build(args).await;
+        let tests = T::tests();
+        let mut test_stream = TestStream::new(tests.iter(), ctx.clone());
+        while let Some(t) = test_stream.next().await {
+            // println!("trace: {:?}", t.trace);
+        }
+        let mut child_stream = MapT::<_, _, ChildTypes<T>>::new(Self, ctx);
+        while let Some(child) = child_stream.next().await {
+            println!("child");
+        }
+        // let _: ChildTypes<T>;
     }
 }
 
@@ -586,7 +622,10 @@ where
 // impl<T> Foo for Op<T> where T: Bar {}
 // impl<U> Foo for Op<U> where T: Baz {}
 // self.next is an associated fn so that it can have diff behavior for diff input types
-fn foo<T>() where T: Default {
+fn foo<T>()
+where
+    T: Default,
+{
     let x: T = Default::default();
     let x: fn() -> T = Default::default;
     boo(x);
@@ -603,7 +642,6 @@ fn boo<T>(f: fn() -> T) {
 // https://users.rust-lang.org/t/emulating-type-families-with-relational-traits/29463
 // impl Builder<Lst: TList, N: Nat> for ...
 // What about generating an enum for each list, then matching on the element discrimant
-
 
 // Same as the Iterator impl except:
 // - F is async, and the Stream Item is not the future but the resolved type.
@@ -758,8 +796,10 @@ mod test {
         fn call(&self, args: Args) -> Self::Out {}
     }
 
-    register_ctx!(NullCtx, [Ctx1, Ctx2]);
+    register_ctx!(NullCtx, [Ctx1, Ctx0]);
     register_ctx!(Ctx0, [Ctx2]);
+    register_ctx!(Ctx1);
+    register_ctx!(Ctx2);
 
     struct NoopBuilder;
     impl BuilderTSync<()> for NoopBuilder {
@@ -780,23 +820,25 @@ mod test {
     #[tokio::test]
     async fn test() {
         // Get a stream of types from NullCtx:
-        type Foo = TList!(Ctx1, Ctx2);
-        let mut m = MapTSync::<_, _, Foo>::new(NoopBuilder, ());
-        dbg!(m.next());
-        dbg!(m.next());
-        dbg!(m.next());
+        // type Foo = TList!(Ctx1, Ctx2);
+        // let mut m = MapTSync::<_, _, Foo>::new(NoopBuilder, ());
+        // dbg!(m.next());
+        // dbg!(m.next());
+        // dbg!(m.next());
 
-        let mut s = MapT::<_, _, Foo>::new(NoopBuilder, ());
-        dbg!(s.next().await);
-        dbg!(s.next().await);
-        dbg!(s.next().await);
+        // let mut s = MapT::<_, _, Foo>::new(NoopBuilder, ());
+        // dbg!(s.next().await);
+        // dbg!(s.next().await);
+        // dbg!(s.next().await);
 
-        // type Ctxs = TList!(Ctx0, Ctx1);
-        // let init_ctx = NullCtx;
-        // let mut iter = <Ctxs as MapToIter<_, ()>>::map_to_iter(RunrunBuilder, ());
-        // for f in iter {
-        //     f(init_ctx.clone()).await;
-        // }
+        type Ctxs = TList!(Ctx0);
+        // let _ = <ChildTypes<NullCtx> as MapNext<Runner, NullCtx, ChildTypes<NullCtx>>>::map_next;
+
+        let init_ctx = NullCtx;
+        let mut s = MapT::<_, _, ChildTypes<NullCtx>>::new(Runner, init_ctx);
+        while let Some(x) = s.next().await {
+            println!("x: {:?}", x);
+        }
     }
 }
 
