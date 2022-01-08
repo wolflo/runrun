@@ -12,6 +12,7 @@ pub mod stream;
 pub mod ty;
 
 pub mod core_stream;
+pub mod eth_stream;
 mod exp;
 pub mod hooks_stream;
 pub mod types;

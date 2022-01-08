@@ -88,7 +88,7 @@ where
         Self {
             f,
             args,
-            next: <Lst as MapStep<F, Args>>::next,
+            next: <Lst as MapStep<F, Args>>::step,
         }
     }
 }
@@ -100,7 +100,7 @@ where
     // Lst only serves to determine the type of the original TList to be mapped over.
     // In practice, we care about the current position in the TList being mapped over,
     // represented by the implementer of this trait.
-    fn next<Lst>(map: &mut MapT<F, Args, Lst>) -> Option<FnFut<'_, F, Args>>
+    fn step<Lst>(map: &mut MapT<F, Args, Lst>) -> Option<FnFut<'_, F, Args>>
     where
         Lst: ?Sized;
 }
@@ -108,7 +108,7 @@ impl<F, Args> MapStep<F, Args> for TNil
 where
     F: FnT<Args>,
 {
-    fn next<Lst>(_map: &mut MapT<F, Args, Lst>) -> Option<FnFut<'_, F, Args>>
+    fn step<Lst>(_map: &mut MapT<F, Args, Lst>) -> Option<FnFut<'_, F, Args>>
     where
         Lst: ?Sized,
     {
@@ -123,11 +123,11 @@ where
     H: MapBounds<Args>,
     ChildTypes<H>: MapStep<F, H>,
 {
-    fn next<Lst>(map: &mut MapT<F, Args, Lst>) -> Option<FnFut<'_, F, Args>>
+    fn step<Lst>(map: &mut MapT<F, Args, Lst>) -> Option<FnFut<'_, F, Args>>
     where
         Lst: ?Sized,
     {
-        map.next = <T as MapStep<F, Args>>::next;
+        map.next = <T as MapStep<F, Args>>::step;
         Some(F::call::<H>(&map.f, map.args.clone()))
     }
 }

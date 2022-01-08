@@ -25,41 +25,14 @@ impl<T, Args> MapBounds<Args> for T where
 {
 }
 
-pub struct Runner;
-#[async_trait]
-impl<Args> FnT<Args> for Runner
-where
-    Args: Send + 'static,
-{
-    type Output = ();
-    async fn call<T>(&self, args: Args) -> FnOut<Self, Args>
-    where
-        Self: FnT<T>,
-        T: MapBounds<Args>,
-        ChildTypes<T>: MapStep<Self, T>,
-    {
-        let ctx = T::build(args).await;
-        let tests = T::tests();
-        let mut test_stream = TestStream::new(tests.iter(), ctx.clone());
-
-        let mut pass = 0;
-        let mut fail = 0;
-        let mut skip = 0;
-        while let Some(test_res) = test_stream.next().await {
-            match test_res.status {
-                Status::Pass => pass += 1,
-                Status::Fail => fail += 1,
-                Status::Skip => skip += 1,
-            }
-        }
-        println!("tests passed : {}", pass);
-        println!("tests failed : {}", fail);
-        println!("tests skipped: {}", skip);
-
-        let child_stream = MapT::<_, _, ChildTypes<T>>::new(Self, ctx);
-        let _c = child_stream.collect::<Vec<_>>();
-    }
+// TODO
+#[derive(Clone)]
+pub struct TestCase<'a, T> {
+    pub name: &'static str,
+    pub test: &'a crate::types::AsyncFn<'a, T, anyhow::Result<()>>,
 }
+
+
 #[async_trait]
 pub trait Ctx {
     type Base;
@@ -134,7 +107,7 @@ where
 
 // TestStream takes an iterator over tests and returns a running stream of TestRes.
 // Filters can act on the input iterator before constructing a TestStream
-struct TestStream<'a, Iter, Ctx> {
+pub struct TestStream<'a, Iter, Ctx> {
     tests: Iter,
     ctx: Ctx,
     _tick: PhantomData<&'a u8>,

@@ -5,77 +5,108 @@ use futures::{
     FutureExt,
 };
 use std::{
-    fmt::Debug,
-    marker::PhantomData,
     pin::Pin,
     task::{Context, Poll},
 };
 
-use crate::core_stream::{Status, TestRes};
-
-#[derive(Debug, Clone, Copy)]
-struct Pre;
-#[derive(Debug, Clone, Copy)]
-struct Post;
-
-struct Hook<When, S, F, Ctx> {
-    stream: S,
-    hook: F,
-    ctx: Ctx,
-    _when: PhantomData<When>,
-}
+use crate::{types::{ChildTypes, MapStep, FnT, FnOut, MapT}, core_stream::{MapBounds, Status, TestRes, TestStream}};
 
 #[async_trait]
-pub trait TestMut<'a> {
-    async fn run(&mut self) -> TestRes<'a>;
-    fn skip(&self) -> TestRes<'a> {
-        Default::default()
-    }
+pub trait Hooks<'a> {
+    async fn pre(&mut self) -> TestRes<'a>;
+    async fn post(&mut self) -> TestRes<'a>;
+}
+#[derive(Debug, Clone)]
+struct HookStream<S, F, Ctx> {
+    stream: S,
+    hooks: F,
+    ctx: Ctx,
 }
 
-impl<'a, S, F, Ctx> Stream for Hook<Pre, S, F, Ctx>
-where
-    Self: Unpin,
-    S: Stream<Item = TestRes<'a>> + Unpin,
-    F: TestMut<'a>,
-    Ctx: 'a,
+impl<S, F, Ctx> HookStream<S, F, Ctx> 
 {
-    type Item = S::Item;
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let hook_res = ready!(self.hook.run().poll_unpin(cx));
-        // If the hook failed, propogate it as the test result
-        if let Status::Fail = hook_res.status {
-            return Poll::Ready(Some(hook_res));
-        }
-        // Hook passed or skipped, so propogate the original stream
-        self.stream.poll_next_unpin(cx)
+    fn new(stream: S, hooks: F, ctx: Ctx) -> Self {
+        Self { stream, hooks, ctx }
     }
 }
-impl<'a, S, F, Ctx> Stream for Hook<Post, S, F, Ctx>
+impl<'a, S, F, Ctx> Stream for HookStream<S, F, Ctx>
 where
     Self: Unpin,
     S: Stream<Item = TestRes<'a>> + Unpin,
-    F: TestMut<'a>,
+    F: Hooks<'a>,
     Ctx: 'a,
 {
     type Item = S::Item;
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let pre_res = ready!(self.hooks.pre().poll_unpin(cx));
+        // If the pre hook failed, propogate it as the test result
+        if let Status::Fail = pre_res.status {
+            return Poll::Ready(Some(pre_res));
+        }
+        // Pre hook passed or skipped, so resolve the underlying stream
         let test_res = ready!(self.stream.poll_next_unpin(cx));
         match test_res {
-            // test failed, propogate the result and don't run the hook
+            // test failed, propogate the result and don't run the post hook
             Some(res) if matches!(res.status, Status::Fail) => return Poll::Ready(Some(res)),
             // test passed or skipped, continue
             Some(_) => (),
-            // no more tests
+            // no more tests, don't run the post hook?
             None => return Poll::Ready(None),
         }
-        // TODO: skip this hook at times?
-        let hook_res = ready!(self.hook.run().poll_unpin(cx));
-        if let Status::Fail = hook_res.status {
-            // test passed or skipped, but hook failed. Propogate hook result
-            Poll::Ready(Some(hook_res))
+        let post_res = ready!(self.hooks.post().poll_unpin(cx));
+        if let Status::Fail = post_res.status {
+            // test passed or skipped, but hook failed. Propogate post hook result
+            Poll::Ready(Some(post_res))
         } else {
             Poll::Ready(test_res)
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct HookRunner<H> {
+    hooks: H,
+}
+impl<H> HookRunner<H> {
+    pub fn new(hooks: H) -> Self {
+        Self {
+            hooks
+        }
+    }
+}
+#[async_trait]
+impl<Args, H> FnT<Args> for HookRunner<H>
+where
+    Args: Send + 'static,
+    H: Hooks<'static> + Unpin + Clone + Send + Sync,
+{
+    type Output = ();
+    async fn call<T>(&self, args: Args) -> FnOut<Self, Args>
+    where
+        Self: FnT<T> + Clone,
+        T: MapBounds<Args>,
+        ChildTypes<T>: MapStep<Self, T>,
+    {
+        let ctx = T::build(args).await;
+        let tests = T::tests();
+        let test_stream = TestStream::new(tests.iter(), ctx.clone());
+        let mut test_stream = HookStream::new(test_stream, self.hooks.clone(), ctx.clone());
+
+        let mut pass = 0;
+        let mut fail = 0;
+        let mut skip = 0;
+        while let Some(test_res) = test_stream.next().await {
+            match test_res.status {
+                Status::Pass => pass += 1,
+                Status::Fail => fail += 1,
+                Status::Skip => skip += 1,
+            }
+        }
+        println!("tests passed : {}", pass);
+        println!("tests failed : {}", fail);
+        println!("tests skipped: {}", skip);
+
+        let child_stream = MapT::<_, _, ChildTypes<T>>::new(self.clone(), ctx);
+        let _c = child_stream.collect::<Vec<_>>();
     }
 }
