@@ -154,14 +154,6 @@ pub trait BuilderT<Args>: Sized {
     where
         Self: BuilderT<T>,
         T: MapBounds<Args>,
-        // T: Ctx<Base = Args>
-        //     + TestSet<'static>
-        //     + ChildTypesFn
-        //     + Unpin
-        //     + Clone
-        //     + Send
-        //     + Sync
-        //     + 'static,
         ChildTypes<T>: MapNext<Self, T, ChildTypes<T>>;
 }
 
@@ -808,7 +800,6 @@ mod test {
 
     #[derive(Clone)]
     pub struct TestCase<'a, T> {
-        // pub name: &'static str,
         pub name: &'static str,
         pub test: &'a AsyncFn<T, Result<()>>,
     }

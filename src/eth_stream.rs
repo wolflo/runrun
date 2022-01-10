@@ -4,14 +4,18 @@ use ethers::{
     providers::{DevRpcMiddleware, Middleware},
     types::U256,
 };
-use std::ops::Deref;
 use futures::{
     ready,
     stream::{Stream, StreamExt},
     FutureExt,
 };
+use std::ops::Deref;
 
-use crate::{core_stream::{Ctx, TestRes, TestSet}, hooks_stream::{Hooks, HookRunner}, types::{MapT, MapStep, ChildTypesFn, ChildTypes}};
+use crate::{
+    core_stream::{Ctx, TestRes, TestSet},
+    hooks_stream::{HookRunner, Hooks},
+    types::{ChildTypes, ChildTypesFn, MapStep, MapT},
+};
 
 pub async fn start_eth<'a, M, I, C, Args>(args: Args)
 where
@@ -62,12 +66,12 @@ where
     Ctx: DevRpcCtx<Client = M> + Clone,
 {
     async fn pre(&mut self) -> TestRes<'a> {
-        self.snap_id = self.client.snapshot().await.unwrap();
+        // self.snap_id = self.client.snapshot().await.unwrap();
         Default::default()
     }
 
     async fn post(&mut self) -> TestRes<'a> {
-        self.client.revert_to_snapshot(self.snap_id).await.unwrap();
+        // self.client.revert_to_snapshot(self.snap_id).await.unwrap();
         Default::default()
     }
 }

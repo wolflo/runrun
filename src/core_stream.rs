@@ -25,14 +25,6 @@ impl<T, Args> MapBounds<Args> for T where
 {
 }
 
-// TODO
-#[derive(Clone)]
-pub struct TestCase<'a, T> {
-    pub name: &'static str,
-    pub test: &'a crate::types::AsyncFn<'a, T, anyhow::Result<()>>,
-}
-
-
 #[async_trait]
 pub trait Ctx {
     type Base;

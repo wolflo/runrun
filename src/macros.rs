@@ -8,7 +8,7 @@
 #[macro_export]
 macro_rules! register_ctx {
     ($ctx:ty, [$($children:ty),*]) => (
-        impl runrun::ty::ChildTypesFn for $ctx {
+        impl runrun::types::ChildTypesFn for $ctx {
             type Out = $crate::TList!($($children),*);
         }
     );
@@ -17,25 +17,25 @@ macro_rules! register_ctx {
     };
 }
 
-#[macro_export]
-macro_rules! tlist {
-    () => { $crate::ty::TNil };
-    (...$rest:expr) => { $rest };
-    ($a:expr) => { $crate::tlist![$a,] };
-    ($a:expr, $($tok:tt)*) => {
-        $crate::ty::TCons {
-            head: $a,
-            tail: $crate::tlist![$($tok)*],
-        }
-    };
-}
+// #[macro_export]
+// macro_rules! tlist {
+//     () => { $crate::ty::TNil };
+//     (...$rest:expr) => { $rest };
+//     ($a:expr) => { $crate::tlist![$a,] };
+//     ($a:expr, $($tok:tt)*) => {
+//         $crate::ty::TCons {
+//             head: $a,
+//             tail: $crate::tlist![$($tok)*],
+//         }
+//     };
+// }
 
 #[macro_export]
 macro_rules! TList {
-    () => { $crate::ty::TNil };
+    () => { $crate::types::TNil };
     (...$Rest:ty) => { $Rest };
     ($A:ty) => { $crate::TList![$A,] };
     ($A:ty, $($tok:tt)*) => {
-        $crate::ty::TCons<$A, $crate::TList![$($tok)*]>
+        $crate::types::TCons<$A, $crate::TList![$($tok)*]>
     };
 }

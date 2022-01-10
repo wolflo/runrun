@@ -9,7 +9,23 @@ use std::{
     task::{Context, Poll},
 };
 
-use crate::{types::{ChildTypes, MapStep, FnT, FnOut, MapT}, core_stream::{MapBounds, Status, TestRes, TestStream}};
+use crate::{
+    core_stream::{MapBounds, Status, TestRes, TestStream},
+    types::{ChildTypes, FnOut, FnT, MapStep, MapT},
+};
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoopHooks;
+#[async_trait]
+impl<'a> Hooks<'a> for NoopHooks {
+    async fn pre(&mut self) -> TestRes<'a> { Default::default() }
+    async fn post(&mut self) -> TestRes<'a> { Default::default() }
+}
+impl NoopHooks {
+    pub fn new() -> Self {
+        Self
+    }
+}
 
 #[async_trait]
 pub trait Hooks<'a> {
@@ -23,8 +39,7 @@ struct HookStream<S, F, Ctx> {
     ctx: Ctx,
 }
 
-impl<S, F, Ctx> HookStream<S, F, Ctx> 
-{
+impl<S, F, Ctx> HookStream<S, F, Ctx> {
     fn new(stream: S, hooks: F, ctx: Ctx) -> Self {
         Self { stream, hooks, ctx }
     }
@@ -69,9 +84,7 @@ pub struct HookRunner<H> {
 }
 impl<H> HookRunner<H> {
     pub fn new(hooks: H) -> Self {
-        Self {
-            hooks
-        }
+        Self { hooks }
     }
 }
 #[async_trait]
@@ -79,6 +92,7 @@ impl<Args, H> FnT<Args> for HookRunner<H>
 where
     Args: Send + 'static,
     H: Hooks<'static> + Unpin + Clone + Send + Sync,
+    // H: Hooks<'static> + Unpin + Clone + Send + Sync + 'static,
 {
     type Output = ();
     async fn call<T>(&self, args: Args) -> FnOut<Self, Args>
@@ -96,6 +110,7 @@ where
         let mut fail = 0;
         let mut skip = 0;
         while let Some(test_res) = test_stream.next().await {
+            println!("some");
             match test_res.status {
                 Status::Pass => pass += 1,
                 Status::Fail => fail += 1,
