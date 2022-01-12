@@ -8,7 +8,7 @@ use ethers::{
 };
 use std::sync::Arc;
 
-use runrun::{core::Ctx, run_ctx, run_test};
+use runrun::{core_stream::Ctx, run_ctx, run_test};
 
 use crate::{
     init::{Client, Ctx0},
@@ -48,7 +48,7 @@ impl Ctx for Ctx1 {
 
 #[run_test]
 async fn test_minted(ctx: Ctx1) -> Result<()> {
-    println!("test_minted");
+    println!("running test_minted");
     let paused = ctx.token.paused().call().await?;
     assert!(!paused);
     Ok(())

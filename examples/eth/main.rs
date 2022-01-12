@@ -1,8 +1,9 @@
 use ethers::{prelude::LocalWallet, utils::Ganache};
-use runrun::{core::start, eth::EthRunner, register_ctx};
+// use runrun::{core::start, eth::EthRunner, register_ctx};
+use runrun::{eth_stream::start_eth, register_ctx};
 
 mod init;
-use init::Ctx0;
+use init::{Ctx0, Inner};
 
 mod block0;
 mod block1;
@@ -29,5 +30,6 @@ async fn main() {
     let accts: Vec<LocalWallet> = node.keys()[..5].iter().map(|x| x.clone().into()).collect();
 
     // Run all tests, starting at Ctx0
-    start::<EthRunner<Ctx0>, _, _>((node.endpoint(), accts)).await;
+    start_eth::<Inner, _, Ctx0, _>((node.endpoint(), accts)).await;
+    // start::<EthRunner<Ctx0>, _, _>((node.endpoint(), accts)).await;
 }

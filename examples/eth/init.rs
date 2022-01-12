@@ -6,11 +6,13 @@ use ethers::{
 use std::{convert::TryFrom, sync::Arc, time::Duration};
 
 use runrun::run_ctx;
-use runrun::{core::Ctx, eth::DevRpcCtx, ty::*, TList};
+// use runrun::{core::Ctx, eth_stream::DevRpcCtx, ty::*, TList};
+use runrun::{core_stream::Ctx, eth_stream::DevRpcCtx, types::*, TList};
 
 use crate::utils::{make_factory, ERC20MinterPauser};
 
 pub type Client = DevRpcMiddleware<SignerMiddleware<Provider<Http>, Wallet<SigningKey>>>;
+pub type Inner = SignerMiddleware<Provider<Http>, Wallet<SigningKey>>;
 
 #[derive(Clone)]
 pub struct Ctx0 {
