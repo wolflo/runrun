@@ -1,17 +1,11 @@
 use async_trait::async_trait;
 use futures::{
-    ready,
-    stream::{Stream, StreamExt},
+    stream::StreamExt,
     stream,
-    FutureExt,
-};
-use std::{
-    pin::Pin,
-    task::{Context, Poll},
 };
 
 use crate::{
-    core_stream::{MapBounds, Status, TestRes, Test, TestStream},
+    core_stream::{MapBounds, Status, TestRes, Test},
     types::{ChildTypes, FnOut, FnT, MapStep, MapT},
 };
 
@@ -37,51 +31,6 @@ pub trait Hooks<'a> {
     async fn pre(&mut self) -> TestRes<'a>;
     async fn post(&mut self) -> TestRes<'a>;
 }
-#[derive(Debug, Clone)]
-struct HookStream<S, F, Ctx> {
-    stream: S,
-    hooks: F,
-    ctx: Ctx,
-}
-
-impl<S, F, Ctx> HookStream<S, F, Ctx> {
-    fn new(stream: S, hooks: F, ctx: Ctx) -> Self {
-        Self { stream, hooks, ctx }
-    }
-}
-impl<'a, S, F, Ctx> Stream for HookStream<S, F, Ctx>
-where
-    Self: Unpin,
-    S: Stream<Item = TestRes<'a>> + Unpin,
-    F: Hooks<'a>,
-    Ctx: 'a,
-{
-    type Item = S::Item;
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let pre_res = ready!(self.hooks.pre().poll_unpin(cx));
-        // If the pre hook failed, propogate it as the test result
-        if let Status::Fail = pre_res.status {
-            return Poll::Ready(Some(pre_res));
-        }
-        // Pre hook passed or skipped, so resolve the underlying stream
-        let test_res = ready!(self.stream.poll_next_unpin(cx));
-        match test_res {
-            // test failed, propogate the result and don't run the post hook
-            Some(res) if matches!(res.status, Status::Fail) => return Poll::Ready(Some(res)),
-            // test passed or skipped, continue
-            Some(_) => (),
-            // no more tests, don't run the post hook?
-            None => return Poll::Ready(None),
-        }
-        let post_res = ready!(self.hooks.post().poll_unpin(cx));
-        if let Status::Fail = post_res.status {
-            // test passed or skipped, but hook failed. Propogate post hook result
-            Poll::Ready(Some(post_res))
-        } else {
-            Poll::Ready(test_res)
-        }
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct HookRunner<H> {
@@ -92,14 +41,27 @@ impl<H> HookRunner<H> {
         Self { hooks }
     }
 }
-pub async fn run_test<'a, T, H>(t: &dyn Test<'a, T>, ctx: T, mut hooks: H) -> TestRes<'a> 
+pub async fn run_test<'a, T, H>(t: &dyn Test<'a, T>, ctx: T, mut hooks: H) -> TestRes<'a>
 where
     H: Hooks<'static>
 {
-    hooks.pre().await;
-    let res = t.run(ctx).await;
-    hooks.post().await;
-    res
+    let pre_res = hooks.pre().await;
+    // If the pre hook failed, return it as the test result, skipping test and post hook
+    if let Status::Fail = pre_res.status {
+        return pre_res
+    }
+    let test_res = t.run(ctx).await;
+    // If the test failed, return the result and don't run the post hook
+    if let Status::Fail = test_res.status {
+        return test_res
+    }
+    let post_res = hooks.post().await;
+    // If the test passed but the post hook failed, return the post hook failure
+    if let Status::Fail = post_res.status {
+        return post_res
+    }
+    // Everything passed. Return the test result
+    test_res
 }
 #[async_trait]
 impl<Args, H> FnT<Args> for HookRunner<H>

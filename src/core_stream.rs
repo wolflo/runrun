@@ -1,18 +1,9 @@
 use async_trait::async_trait;
-use futures::{
-    ready,
-    stream::{Stream, StreamExt},
-    FutureExt,
-    future::BoxFuture,
-};
 use std::{
     fmt::Debug,
-    marker::PhantomData,
-    pin::Pin,
-    task::{Context, Poll},
 };
 
-use crate::types::{ChildTypes, ChildTypesFn, AsyncFn, FnOut, FnT, MapStep, MapT};
+use crate::types::{ChildTypesFn, AsyncFn,};
 
 
 // Used by the MapT type to bound the types that can be mapped over. Ideally
@@ -136,58 +127,5 @@ where
     }
     fn skip(&self) -> TestRes<'a> {
         (**self).skip()
-    }
-}
-
-
-
-// TestStream takes an iterator over tests and returns a running stream of TestRes.
-// Filters can act on the input iterator before constructing a TestStream
-pub struct TestStream<'a, Iter, Ctx> {
-    tests: Iter,
-    ctx: Ctx,
-    // fut: Option<BoxFuture<'a, TestRes<'a>>>,
-    _tick: PhantomData<&'a u8>,
-}
-impl<'a, T, I, Ctx> TestStream<'a, I, Ctx>
-where
-    Self: Unpin,
-    I: Iterator<Item = T> + 'a,
-    T: Test<'a, Ctx> + Unpin,
-{
-    pub fn new(tests: I, ctx: Ctx) -> Self {
-        Self {
-            tests,
-            ctx,
-            // fut: None,
-            _tick: PhantomData,
-        }
-    }
-}
-impl<'a, I, T, Ctx> Stream for TestStream<'a, I, Ctx>
-where
-    Self: Unpin,
-    I: Iterator<Item = T> + 'a,
-    T: Test<'a, Ctx> + Unpin + 'static,
-    Ctx: Clone,
-{
-    type Item = TestRes<'a>;
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        println!("TestStream poll_next");
-        let next = self.tests.next();
-        if let Some(t) = next {
-            let res = ready!(t.run(self.ctx.clone()).poll_unpin(cx));
-            Poll::Ready(Some(res))
-            // let mut fut = t.run(self.ctx.clone());
-            // match fut.poll_unpin(cx) {
-            //     Poll::Ready(res) => Poll::Ready(Some(res)),
-            //     Poll::Pending => {
-            //         self.get_mut().fut = Some(fut);
-            //         Poll::Pending
-            //     }
-            // }
-        } else {
-            Poll::Ready(None)
-        }
     }
 }

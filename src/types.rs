@@ -19,18 +19,8 @@ pub struct TNil;
 #[derive(Debug, Clone, Copy)]
 pub struct TCons<H: ?Sized, T: ?Sized>(PhantomData<H>, PhantomData<T>);
 
-// pub type AsyncRes<'fut, Y> = Pin<Box<dyn Future<Output = Y> + Send + 'fut>>;
+// pub type BoxFuture<'fut, Y> = Pin<Box<dyn Future<Output = Y> + Send + 'fut>>;
 pub type AsyncFn<'fut, X, Y> = dyn Fn(X) -> BoxFuture<'fut, Y> + Send + Sync;
-
-// TODO: Remove?
-// Get first element of a TList. Undefined for an empty TList (TNil)
-pub type Head<T> = <T as HeadFn>::Out;
-pub trait HeadFn {
-    type Out;
-}
-impl<H, T> HeadFn for TCons<H, T> {
-    type Out = H;
-}
 
 // A mapping from type -> TList of descendant types. Specifically, this is
 // used to define the child Ctxs that can be built from each Ctx.
@@ -94,80 +84,6 @@ where
         }
     }
 }
-
-// Given a TList and a function that maps each type in the TList to values
-// of the same type, we can map the function over the TList to generate an
-// iterator/stream. Akin to std::iter::Map.
-//pub struct MapT<'a, F, Args, Lst>
-//where
-//    F: FnT<Args> + ?Sized,
-//    Lst: ?Sized,
-//{
-//    pub f: &'a F,
-//    pub args: Args,
-//    next: fn(&'_ mut Self) -> Option<FnFut<'a, F, Args>>,
-//    fut: Option<FnFut<'a, F, Args>>,
-//}
-
-//impl<'a, F, Args, Lst> Stream for MapT<'a, F, Args, Lst>
-//where
-//    F: FnT<Args>,
-//    Args: Unpin + Clone,
-//    Lst: ?Sized,
-//{
-//    type Item = <F as FnT<Args>>::Output;
-//    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-//        println!("MapT poll_next");
-//        let me = self.get_mut();
-//        // If we're waiting on a future to resolve, poll it
-//        if let Some(ref mut fut) = me.fut {
-//            println!("polling stored future.");
-//            if let Poll::Ready(res) = fut.poll_unpin(cx) {
-//                println!("stored future resolved.");
-//                me.fut.take();
-//                Poll::Ready(Some(res))
-//            } else {
-//                println!("still waiting on stored future.");
-//                Poll::Pending
-//            }
-//        // No pending future, so start the next one
-//        } else {
-//            if let Some(mut fut) = (me.next)(me) {
-//                // If the future resolves immediately, return the result
-//                if let Poll::Ready(res) = fut.poll_unpin(cx) {
-//                    println!("next ready.");
-//                    Poll::Ready(Some(res))
-//                } else {
-//                    // Future is pending, so store it for next time we're polled
-//                    //@wol not being polled again still
-//                    println!("storing fut.");
-//                    me.fut = Some(fut);
-//                    // Pin::new(me).poll_next(cx)
-//                    Poll::Pending
-//                }
-//            } else {
-//                println!("stream exhausted.");
-//                // no more items to map over
-//                Poll::Ready(None)
-//            }
-//        }
-//    }
-//}
-
-//impl<'a, F, Args, Lst> MapT<'a, F, Args, Lst>
-//where
-//    F: FnT<Args>,
-//    Lst: ?Sized + MapStep<F, Args>,
-//{
-//    pub fn new(f: &'a F, args: Args) -> Self {
-//        Self {
-//            f: f,
-//            args,
-//            next: |map| <Lst as MapStep<F, Args>>::step(map),
-//            fut: None,
-//        }
-//    }
-//}
 
 pub trait MapStep<F, Args>
 where

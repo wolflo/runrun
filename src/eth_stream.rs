@@ -5,9 +5,7 @@ use ethers::{
 };
 use futures::{
     stream,
-    ready,
-    stream::{Stream, StreamExt},
-    FutureExt,
+    stream::StreamExt,
 };
 use std::ops::Deref;
 
