@@ -1,10 +1,4 @@
-// All credit to lloydmeta's frunk crate:
-// https://github.com/lloydmeta/frunk/blob/09a3d4f45f7b2ac5b996fcdaa7c85173f0533ab1/core/src/macros.rs
-
-// impl ChildTypesFn for Ctx0 {
-//     type Out = TList!(Ctx1);
-// }
-
+// impl ChildTypesFn for Ctx0 { type Out = TList!(Ctx1, Ctx2); }
 #[macro_export]
 macro_rules! register_ctx {
     ($ctx:ty, [$($children:ty),*]) => (
@@ -17,19 +11,9 @@ macro_rules! register_ctx {
     };
 }
 
-// #[macro_export]
-// macro_rules! tlist {
-//     () => { $crate::ty::TNil };
-//     (...$rest:expr) => { $rest };
-//     ($a:expr) => { $crate::tlist![$a,] };
-//     ($a:expr, $($tok:tt)*) => {
-//         $crate::ty::TCons {
-//             head: $a,
-//             tail: $crate::tlist![$($tok)*],
-//         }
-//     };
-// }
 
+// TList macro from lloydmeta's frunk crate:
+// https://github.com/lloydmeta/frunk/blob/09a3d4f45f7b2ac5b996fcdaa7c85173f0533ab1/core/src/macros.rs
 #[macro_export]
 macro_rules! TList {
     () => { $crate::types::TNil };

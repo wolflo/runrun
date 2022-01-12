@@ -11,6 +11,7 @@ use linkme::distributed_slice;
 use std::{convert::TryFrom, sync::Arc, time::Duration};
 
 use runrun::{core_stream::*, eth_stream::*, register_ctx};
+use runrun_derive::*;
 
 pub type Client = DevRpcMiddleware<SignerMiddleware<Provider<Http>, Wallet<SigningKey>>>;
 pub type Inner = SignerMiddleware<Provider<Http>, Wallet<SigningKey>>;
@@ -104,8 +105,40 @@ pub static __T12: &dyn Test<Ctx1> = &TestCase {
 #[distributed_slice]
 pub static TESTS_ON_CTX0: [&'static dyn Test<'static, Ctx0>] = [..];
 
-register_ctx!(Ctx0, [Ctx1]);
+#[derive(Debug, Clone)]
+pub struct Ctx3;
+
+#[run_ctx]
+#[async_trait]
+impl Ctx for Ctx3 {
+    type Base = Ctx2;
+    async fn build(ctx: Self::Base) -> Self {
+        println!("building 3");
+        Self {}
+    }
+}
+#[run_test]
+async fn test_31(_: Ctx3) -> Result<()> {
+    println!("running test_31");
+    Ok(())
+}
+// #[distributed_slice(TESTS_ON_CTX3)]
+// pub static __T31: &dyn Test<'static, Ctx3> = &TestCase {
+//     name: "test_31",
+//     test: &|x| Box::pin(test_31(x)),
+// };
+// impl TestSet<'static> for Ctx3 {
+//     fn tests() -> &'static [&'static dyn Test<'static, Self>] {
+//         &TESTS_ON_CTX3
+//     }
+// }
+// #[distributed_slice]
+// pub static TESTS_ON_CTX3: [&'static dyn Test<'static, Ctx3>] = [..];
+
+register_ctx!(Ctx0, [Ctx1, Ctx2]);
 register_ctx!(Ctx1);
+register_ctx!(Ctx2, [Ctx3]);
+register_ctx!(Ctx3);
 
 #[tokio::main]
 async fn main() {

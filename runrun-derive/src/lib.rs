@@ -22,13 +22,12 @@ pub fn run_test(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let name = &input.sig.ident;
 
-
     let tests_id = format_ident!("TESTS_ON_{}", state_big);
 
     let res = quote! {
         const _: () = {
             #[linkme::distributed_slice(#tests_id)]
-            static __: runrun::core::Testable<#state_on> = &runrun::core::TestCase { name: stringify!(#name), test: &|s| Box::pin(#name(s)) };
+            static __: &dyn runrun::core_stream::Test<'static, #state_on> = &runrun::core_stream::TestCase { name: stringify!(#name), test: &|ctx| Box::pin(#name(ctx)) };
         };
         #input
     };
@@ -49,10 +48,10 @@ pub fn run_ctx(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let res = quote! {
         #[linkme::distributed_slice]
-        pub static #tests_id: [runrun::core::Testable<#state_on>] = [..];
+        pub static #tests_id: [&'static dyn runrun::core_stream::Test<'static, #state_on>] = [..];
 
-        impl runrun::core::TestSet for #state_on {
-            fn tests() -> &'static [runrun::core::Testable<Self>] {
+        impl runrun::core_stream::TestSet<'static> for #state_on {
+            fn tests() -> &'static [&'static dyn runrun::core_stream::Test<'static, Self>] {
                 &#tests_id
             }
         }
@@ -61,10 +60,10 @@ pub fn run_ctx(_attr: TokenStream, item: TokenStream) -> TokenStream {
     res.into()
 }
 
-#[proc_macro]
-pub fn collect(input: TokenStream) -> TokenStream {
-    let span = Span::call_site();
-    // let x = span.source_file();
-    // eprintln!("input: {:?}", x);
-    "fn answer() -> u32 { 42 }".parse().unwrap()
-}
+// #[proc_macro]
+// pub fn collect(input: TokenStream) -> TokenStream {
+//     let span = Span::call_site();
+//     // let x = span.source_file();
+//     // eprintln!("input: {:?}", x);
+//     "fn answer() -> u32 { 42 }".parse().unwrap()
+// }
