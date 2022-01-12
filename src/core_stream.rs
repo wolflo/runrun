@@ -3,6 +3,7 @@ use futures::{
     ready,
     stream::{Stream, StreamExt},
     FutureExt,
+    future::BoxFuture,
 };
 use std::{
     fmt::Debug,
@@ -143,6 +144,7 @@ where
 pub struct TestStream<'a, Iter, Ctx> {
     tests: Iter,
     ctx: Ctx,
+    // fut: Option<BoxFuture<'a, TestRes<'a>>>,
     _tick: PhantomData<&'a u8>,
 }
 impl<'a, T, I, Ctx> TestStream<'a, I, Ctx>
@@ -155,6 +157,7 @@ where
         Self {
             tests,
             ctx,
+            // fut: None,
             _tick: PhantomData,
         }
     }
@@ -168,10 +171,19 @@ where
 {
     type Item = TestRes<'a>;
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        println!("TestStream poll_next");
         let next = self.tests.next();
         if let Some(t) = next {
             let res = ready!(t.run(self.ctx.clone()).poll_unpin(cx));
             Poll::Ready(Some(res))
+            // let mut fut = t.run(self.ctx.clone());
+            // match fut.poll_unpin(cx) {
+            //     Poll::Ready(res) => Poll::Ready(Some(res)),
+            //     Poll::Pending => {
+            //         self.get_mut().fut = Some(fut);
+            //         Poll::Pending
+            //     }
+            // }
         } else {
             Poll::Ready(None)
         }

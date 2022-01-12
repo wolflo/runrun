@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use futures::{
     ready,
     stream::{Stream, StreamExt},
+    stream,
     FutureExt,
 };
 use std::{
@@ -10,7 +11,7 @@ use std::{
 };
 
 use crate::{
-    core_stream::{MapBounds, Status, TestRes, TestStream},
+    core_stream::{MapBounds, Status, TestRes, Test, TestStream},
     types::{ChildTypes, FnOut, FnT, MapStep, MapT},
 };
 
@@ -91,6 +92,9 @@ impl<H> HookRunner<H> {
         Self { hooks }
     }
 }
+pub async fn run_test<'a, T>(ctx: T, t: &dyn Test<'a, T>) -> TestRes<'a> {
+    t.run(ctx).await
+}
 #[async_trait]
 impl<Args, H> FnT<Args> for HookRunner<H>
 where
@@ -106,15 +110,19 @@ where
     {
         let ctx = T::build(args).await;
         let tests = T::tests();
-        let test_stream = TestStream::new(tests.iter(), ctx.clone());
-        let mut test_stream = HookStream::new(test_stream, self.hooks.clone(), ctx.clone());
+        // let test_stream = TestStream::new(tests.iter(), ctx.clone());
+        // let mut test_stream = HookStream::new(test_stream, self.hooks.clone(), ctx.clone());
+
+        let test_stream = stream::iter(tests.iter());
+        let mut res_stream = test_stream.map(|&t| t.run(ctx.clone()));
+        // let mut res_stream = HookStream::new(res_stream, self.hooks.clone(), ctx.clone());
 
         let mut pass = 0;
         let mut fail = 0;
         let mut skip = 0;
-        while let Some(test_res) = test_stream.next().await {
-            println!("some");
-            match test_res.status {
+        while let Some(test_res) = res_stream.next().await {
+            println!("next test");
+            match test_res.await.status {
                 Status::Pass => pass += 1,
                 Status::Fail => fail += 1,
                 Status::Skip => skip += 1,
@@ -124,7 +132,8 @@ where
         println!("tests failed : {}", fail);
         println!("tests skipped: {}", skip);
 
-        let child_stream = MapT::<_, _, ChildTypes<T>>::new(self, ctx);
-        let _c = child_stream.collect::<Vec<_>>();
+        let child_iter = MapT::<_, _, ChildTypes<T>>::new(self, ctx);
+        let mut child_stream = stream::iter(child_iter);
+        while let Some(_) = child_stream.next().await { }
     }
 }
