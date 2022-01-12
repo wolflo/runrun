@@ -11,11 +11,12 @@ use std::{
     task::{Context, Poll},
 };
 
-use crate::types::{ChildTypes, ChildTypesFn, FnOut, FnT, MapStep, MapT};
+use crate::types::{ChildTypes, ChildTypesFn, AsyncFn, FnOut, FnT, MapStep, MapT};
+
 
 // Used by the MapT type to bound the types that can be mapped over. Ideally
-// we would be able to map an arbitrary fn, but unfortunately we can only map
-// fns that share the same trait bounds.
+// we would be able to map an arbitrary FnT, but unfortunately we can only map
+// FnT's that share the same trait bounds.
 pub trait MapBounds<Args>:
     Ctx<Base = Args> + TestSet<'static> + ChildTypesFn + Unpin + Clone + Send + Sync + 'static
 {
@@ -66,11 +67,50 @@ impl Default for TestRes<'_> {
     }
 }
 
+#[derive(Clone)]
+pub struct TestCase<'a, Args, Res> {
+    pub name: &'static str,
+    pub test: &'a AsyncFn<'a, Args, Res>,
+}
+#[async_trait]
+impl<'a, Args, Res> Test<'a, Args> for TestCase<'_, Args, Res>
+where
+    Args: Send + Sync + 'static,
+    Res: Test<'a, ()>,  // could also pass args to result.run()
+{
+    async fn run(&self, args: Args) -> TestRes<'a> {
+        println!("{}", self.name);
+        (self.test)(args).await.run(()).await
+    }
+}
+// () is a trivially passing Test
+#[async_trait]
+impl<'a, Args: Send + 'static> Test<'a, Args> for ()
+{
+    async fn run(&self, _args: Args) -> TestRes<'a> {
+        TestRes {
+            status: Status::Pass,
+            trace: &"",
+        }
+    }
+}
+// true is a passing Test, false is a failing Test
+#[async_trait]
+impl<'a, Args: Send + 'static> Test<'a, Args> for bool
+{
+    async fn run(&self, _args: Args) -> TestRes<'a> {
+        let status = if *self { Status::Pass } else { Status::Fail };
+        TestRes {
+            status,
+            trace: &"",
+        }
+    }
+}
 #[async_trait]
 impl<'a, T, E, Args> Test<'a, Args> for Result<T, E>
 where
     T: Test<'a, Args> + Send + Sync,
-    E: Into<&'a dyn Debug> + Clone + Send + Sync + 'a,
+    E: Into<Box<dyn std::error::Error>> + Send + Sync + 'a,
     Args: Send + Sync + 'static,
 {
     async fn run(&self, args: Args) -> TestRes<'a> {
@@ -78,7 +118,8 @@ where
             Ok(r) => r.run(args).await,
             Err(e) => TestRes {
                 status: Status::Fail,
-                trace: (*e).clone().into(),
+                trace: &"Test of Err value. We should provide real traces for these."
+                // trace: (*e).clone().into(),
             },
         }
     }
