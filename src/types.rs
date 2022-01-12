@@ -5,9 +5,9 @@ use futures::{
     Future, FutureExt,
 };
 use std::{
-    sync::Arc,
     marker::PhantomData,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
 
@@ -39,19 +39,17 @@ pub trait ChildTypesFn {
     type Out;
 }
 
+// FnOut is the output type of an FnT
+pub type FnOut<F, Args> = <F as FnT<Args>>::Output;
+// FnFut is the output type of an FnT, wrapped in a pinned future
+pub type FnFut<'fut, F, Args> = BoxFuture<'fut, FnOut<F, Args>>;
 // FnT is basically an Fn trait, but async and with a type parameter to call().
 // Sadly, we can't map an arbitrary function over a TList without GATs and
 // specialization, so we need to include all of the bounds for the runner
 // directly on the FnT trait.
 // https://willcrichton.net/notes/gats-are-hofs/
-// FnOut is the output type of an FnT
-pub type FnOut<F, Args> = <F as FnT<Args>>::Output;
-// FnFut is the output type of an FnT, wrapped in a future
-pub type FnFut<'fut, F, Args> = BoxFuture<'fut, FnOut<F, Args>>;
-pub type FnFut2<F, Args> = Pin<Box<dyn Future<Output = FnOut<F, Args>> + Send>>;
-// TODO: Sized bound should be removable
 #[async_trait]
-pub trait FnT<Args>: Sized {
+pub trait FnT<Args> {
     type Output;
     async fn call<T>(&self, args: Args) -> FnOut<Self, Args>
     where
@@ -65,7 +63,7 @@ pub trait FnT<Args>: Sized {
 // iterator/stream. Akin to std::iter::Map.
 pub struct MapT<'a, F, Args, Lst>
 where
-    F: FnT<Args>,
+    F: FnT<Args> + ?Sized,
     Lst: ?Sized,
 {
     pub f: &'a F,
@@ -83,7 +81,7 @@ where
     type Item = <F as FnT<Args>>::Output;
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let me = self.get_mut();
-        // If we're waiting on a future to resolve, Poll it
+        // If we're waiting on a future to resolve, poll it
         if let Some(ref mut fut) = me.fut {
             if let Poll::Ready(res) = fut.poll_unpin(cx) {
                 me.fut = None;
@@ -127,7 +125,7 @@ where
 
 pub trait MapStep<F, Args>
 where
-    F: FnT<Args>,
+    F: FnT<Args> + ?Sized,
 {
     // Lst type param only serves to determine the type of the original TList
     // to be mapped over. In practice, we care about the current position in
@@ -147,7 +145,7 @@ where
 {
     fn step<'a, Lst>(map: &mut MapT<'a, F, Args, Lst>) -> Option<FnFut<'a, F, Args>>
     where
-        Lst: ?Sized
+        Lst: ?Sized,
     {
         map.next = |map| <T as MapStep<F, Args>>::step(map);
         Some(map.f.call::<H>(map.args.clone()))
@@ -160,7 +158,7 @@ where
 {
     fn step<'a, Lst>(_map: &mut MapT<'a, F, Args, Lst>) -> Option<FnFut<'a, F, Args>>
     where
-        Lst: ?Sized
+        Lst: ?Sized,
     {
         None
     }

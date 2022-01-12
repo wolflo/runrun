@@ -18,8 +18,12 @@ use crate::{
 pub struct NoopHooks;
 #[async_trait]
 impl<'a> Hooks<'a> for NoopHooks {
-    async fn pre(&mut self) -> TestRes<'a> { Default::default() }
-    async fn post(&mut self) -> TestRes<'a> { Default::default() }
+    async fn pre(&mut self) -> TestRes<'a> {
+        Default::default()
+    }
+    async fn post(&mut self) -> TestRes<'a> {
+        Default::default()
+    }
 }
 impl NoopHooks {
     pub fn new() -> Self {
@@ -92,12 +96,11 @@ impl<Args, H> FnT<Args> for HookRunner<H>
 where
     Args: Send + 'static,
     H: Hooks<'static> + Unpin + Clone + Send + Sync,
-    // H: Hooks<'static> + Unpin + Clone + Send + Sync + 'static,
 {
     type Output = ();
     async fn call<T>(&self, args: Args) -> FnOut<Self, Args>
     where
-        Self: FnT<T> + Clone,
+        Self: FnT<T>,
         T: MapBounds<Args>,
         ChildTypes<T>: MapStep<Self, T>,
     {
@@ -121,7 +124,7 @@ where
         println!("tests failed : {}", fail);
         println!("tests skipped: {}", skip);
 
-        let child_stream = MapT::<_, _, ChildTypes<T>>::new(self.clone(), ctx);
+        let child_stream = MapT::<_, _, ChildTypes<T>>::new(self, ctx);
         let _c = child_stream.collect::<Vec<_>>();
     }
 }

@@ -1,4 +1,3 @@
-use anyhow::Result;
 use async_trait::async_trait;
 use ethers::{
     providers::{DevRpcMiddleware, Middleware},
@@ -28,7 +27,7 @@ where
     let init_ctx = C::build(args).await;
     let hooks = DevRpcHooks::new(init_ctx.clone());
     let runner = HookRunner::new(hooks);
-    let mut stream = MapT::<_, _, ChildTypes<C>>::new(runner, init_ctx);
+    let mut stream = MapT::<_, _, ChildTypes<C>>::new(&runner, init_ctx);
     while let Some(_) = stream.next().await {}
 }
 
