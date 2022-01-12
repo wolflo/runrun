@@ -21,18 +21,16 @@ pub async fn start_eth<'a, M, I, C, Args>(args: Args)
 where
     C: Ctx<Base = Args> + TestSet<'a> + ChildTypesFn + DevRpcCtx + Unpin + Clone + Send + 'static,
     ChildTypes<C>: MapStep<HookRunner<DevRpcHooks<C>>, C>,
-    // ChildTypes<C>: MapStep<HookRunner<crate::hooks_stream::NoopHooks>, C>,
     C::Client: Deref<Target = DevRpcMiddleware<I>> + Unpin + Send + Sync,
     I: Middleware + Clone + 'static,
     Args: Send + 'static,
 {
     let init_ctx = C::build(args).await;
     let hooks = DevRpcHooks::new(init_ctx.clone());
-    // let hooks = crate::hooks_stream::NoopHooks::new();
     let runner = HookRunner::new(hooks);
     let iter = MapT::<_, _, ChildTypes<C>>::new(&runner, init_ctx);
     let mut stream = stream::iter(iter);
-    while let Some(set) = stream.next().await { 
+    while let Some(set) = stream.next().await {
         set.await;
     }
 }
@@ -71,12 +69,12 @@ where
     Ctx: DevRpcCtx<Client = M> + Clone,
 {
     async fn pre(&mut self) -> TestRes<'a> {
-        // self.snap_id = self.client.snapshot().await.unwrap();
+        self.snap_id = self.client.snapshot().await.unwrap();
         Default::default()
     }
 
     async fn post(&mut self) -> TestRes<'a> {
-        // self.client.revert_to_snapshot(self.snap_id).await.unwrap();
+        self.client.revert_to_snapshot(self.snap_id).await.unwrap();
         Default::default()
     }
 }

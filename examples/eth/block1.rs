@@ -48,8 +48,25 @@ impl Ctx for Ctx1 {
 
 #[run_test]
 async fn test_minted(ctx: Ctx1) -> Result<()> {
-    println!("running test_minted");
     let paused = ctx.token.paused().call().await?;
     assert!(!paused);
+    Ok(())
+}
+#[run_test]
+async fn test_hooks_3(ctx: Ctx1) -> Result<()> {
+    let bal = ctx.token.balance_of(ctx.mint_receiver).call().await?;
+    assert_eq!(bal, ctx.minted_amt);
+    Ok(())
+}
+#[run_test]
+async fn test_hooks_2(ctx: Ctx1) -> Result<()> {
+    let paused = ctx.token.paused().call().await?;
+    ctx.token.mint(ctx.mint_receiver, 1usize.into()).send().await?;
+    Ok(())
+}
+#[run_test]
+async fn test_hooks_1(ctx: Ctx1) -> Result<()> {
+    let bal = ctx.token.balance_of(ctx.mint_receiver).call().await?;
+    assert_eq!(bal, ctx.minted_amt);
     Ok(())
 }

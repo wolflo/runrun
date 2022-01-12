@@ -45,7 +45,7 @@ pub trait Test<'a, Args>: Send + Sync {
 #[derive(Debug, Clone)]
 pub struct TestRes<'a> {
     pub status: Status,
-    pub trace: &'a dyn Debug,
+    pub trace: &'a (dyn Debug + Sync),
 }
 #[derive(Debug, Clone, Copy)]
 pub enum Status {
@@ -138,6 +138,8 @@ where
         (**self).skip()
     }
 }
+
+
 
 // TestStream takes an iterator over tests and returns a running stream of TestRes.
 // Filters can act on the input iterator before constructing a TestStream

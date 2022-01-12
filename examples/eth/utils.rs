@@ -2,10 +2,10 @@ use anyhow::Result;
 use ethers::prelude::*;
 use std::{fs, path::Path, sync::Arc};
 
-const BUILD_DIR: &str = "./examples/eth_test/out";
+const BUILD_DIR: &str = "./examples/eth/out";
 abigen!(
     ERC20MinterPauser,
-    "./examples/eth_test/out/ERC20MinterPauser.abi",
+    "./examples/eth/out/ERC20MinterPauser.abi",
     event_derives(serde::Deserialize, serde::Serialize)
 );
 

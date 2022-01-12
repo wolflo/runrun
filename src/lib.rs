@@ -6,6 +6,4 @@ pub mod hooks_stream;
 pub mod macros;
 pub mod types;
 
-pub mod lifetimes;
-
 pub use runrun_derive::*;

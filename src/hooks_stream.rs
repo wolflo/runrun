@@ -92,8 +92,14 @@ impl<H> HookRunner<H> {
         Self { hooks }
     }
 }
-pub async fn run_test<'a, T>(ctx: T, t: &dyn Test<'a, T>) -> TestRes<'a> {
-    t.run(ctx).await
+pub async fn run_test<'a, T, H>(t: &dyn Test<'a, T>, ctx: T, mut hooks: H) -> TestRes<'a> 
+where
+    H: Hooks<'static>
+{
+    hooks.pre().await;
+    let res = t.run(ctx).await;
+    hooks.post().await;
+    res
 }
 #[async_trait]
 impl<Args, H> FnT<Args> for HookRunner<H>
@@ -110,18 +116,15 @@ where
     {
         let ctx = T::build(args).await;
         let tests = T::tests();
-        // let test_stream = TestStream::new(tests.iter(), ctx.clone());
-        // let mut test_stream = HookStream::new(test_stream, self.hooks.clone(), ctx.clone());
 
-        let test_stream = stream::iter(tests.iter());
-        let mut res_stream = test_stream.map(|&t| t.run(ctx.clone()));
-        // let mut res_stream = HookStream::new(res_stream, self.hooks.clone(), ctx.clone());
+        let mut test_res = tests.iter().map(|&t| {
+            run_test(t, ctx.clone(), self.hooks.clone())
+        });
 
         let mut pass = 0;
         let mut fail = 0;
         let mut skip = 0;
-        while let Some(test_res) = res_stream.next().await {
-            println!("next test");
+        while let Some(test_res) = test_res.next() {
             match test_res.await.status {
                 Status::Pass => pass += 1,
                 Status::Fail => fail += 1,

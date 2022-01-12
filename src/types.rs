@@ -58,6 +58,10 @@ pub trait FnT<Args> {
         ChildTypes<T>: MapStep<Self, T>;
 }
 
+// Given a TList and a function that maps each type in the TList to values of
+// the same type, we can map the function over the TList to generate an iterator.
+// Akin to std::iter::Map, except the function to be mapped is an FnT, meaning
+// it takes the next type in the TList as a type parameter to call<T>()
 pub struct MapT<'a, F, Args, Lst>
 where
     F: FnT<Args> + ?Sized,
