@@ -3,15 +3,12 @@ use ethers::{
     providers::{DevRpcMiddleware, Middleware},
     types::U256,
 };
-use futures::{
-    stream,
-    stream::StreamExt,
-};
+use futures::{stream, stream::StreamExt};
 use std::ops::Deref;
 
 use crate::{
     core_stream::{Ctx, TestRes, TestSet},
-    hooks_stream::{HookRunner, Hook},
+    hooks_stream::{Hook, HookRunner},
     types::{ChildTypes, ChildTypesFn, MapStep, MapT},
 };
 

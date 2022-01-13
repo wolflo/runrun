@@ -1,9 +1,9 @@
 use async_trait::async_trait;
 use futures::{
+    future::BoxFuture,
     ready,
     stream::{Stream, StreamExt},
     Future, FutureExt,
-    future::BoxFuture,
 };
 use std::{
     marker::PhantomData,

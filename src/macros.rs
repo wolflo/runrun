@@ -11,7 +11,6 @@ macro_rules! register_ctx {
     };
 }
 
-
 // TList macro from lloydmeta's frunk crate:
 // https://github.com/lloydmeta/frunk/blob/09a3d4f45f7b2ac5b996fcdaa7c85173f0533ab1/core/src/macros.rs
 #[macro_export]

@@ -1,10 +1,7 @@
 use async_trait::async_trait;
-use std::{
-    fmt::Debug,
-};
+use std::fmt::Debug;
 
-use crate::types::{ChildTypesFn, AsyncFn,};
-
+use crate::types::{AsyncFn, ChildTypesFn};
 
 // Used by the MapT type to bound the types that can be mapped over. Ideally
 // we would be able to map an arbitrary FnT, but unfortunately we can only map
@@ -68,7 +65,7 @@ pub struct TestCase<'a, Args, Res> {
 impl<'a, Args, Res> Test<'a, Args> for TestCase<'_, Args, Res>
 where
     Args: Send + Sync + 'static,
-    Res: Test<'a, ()>,  // could also pass args to result.run()
+    Res: Test<'a, ()>, // could also pass args to result.run()
 {
     async fn run(&self, args: Args) -> TestRes<'a> {
         println!("{}", self.name);
@@ -77,8 +74,7 @@ where
 }
 // () is a trivially passing Test
 #[async_trait]
-impl<'a, Args: Send + 'static> Test<'a, Args> for ()
-{
+impl<'a, Args: Send + 'static> Test<'a, Args> for () {
     async fn run(&self, _args: Args) -> TestRes<'a> {
         TestRes {
             status: Status::Pass,
@@ -88,14 +84,10 @@ impl<'a, Args: Send + 'static> Test<'a, Args> for ()
 }
 // true is a passing Test, false is a failing Test
 #[async_trait]
-impl<'a, Args: Send + 'static> Test<'a, Args> for bool
-{
+impl<'a, Args: Send + 'static> Test<'a, Args> for bool {
     async fn run(&self, _args: Args) -> TestRes<'a> {
         let status = if *self { Status::Pass } else { Status::Fail };
-        TestRes {
-            status,
-            trace: &"",
-        }
+        TestRes { status, trace: &"" }
     }
 }
 #[async_trait]
@@ -110,8 +102,7 @@ where
             Ok(r) => r.run(args).await,
             Err(e) => TestRes {
                 status: Status::Fail,
-                trace: &"Test of Err value. We should provide real traces for these."
-                // trace: (*e).clone().into(),
+                trace: &"Test of Err value. We should provide real traces for these.", // trace: (*e).clone().into(),
             },
         }
     }
