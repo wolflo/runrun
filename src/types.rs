@@ -33,7 +33,7 @@ pub trait ChildTypesFn {
 pub type FnOut<F, Args> = <F as FnT<Args>>::Output;
 // FnFut is the output type of an FnT, wrapped in a pinned future
 pub type FnFut<'fut, F, Args> = BoxFuture<'fut, FnOut<F, Args>>;
-// FnT is basically an Fn trait, but async and with a type parameter to call().
+// FnT is similar to the FnMut trait, but async and with a type parameter to call().
 // Sadly, we can't map an arbitrary function over a TList without GATs and
 // specialization, so we need to include all of the bounds for the runner
 // directly on the FnT trait.

@@ -10,9 +10,9 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Copy, Default)]
-pub struct NoopHooks;
+pub struct NoHook;
 #[async_trait]
-impl<'a> Hooks<'a> for NoopHooks {
+impl<'a> Hook<'a> for NoHook {
     async fn pre(&mut self) -> TestRes<'a> {
         Default::default()
     }
@@ -20,18 +20,17 @@ impl<'a> Hooks<'a> for NoopHooks {
         Default::default()
     }
 }
-impl NoopHooks {
+impl NoHook {
     pub fn new() -> Self {
         Self
     }
 }
 
 #[async_trait]
-pub trait Hooks<'a> {
+pub trait Hook<'a> {
     async fn pre(&mut self) -> TestRes<'a>;
     async fn post(&mut self) -> TestRes<'a>;
 }
-
 #[derive(Debug, Clone)]
 pub struct HookRunner<H> {
     hooks: H,
@@ -41,16 +40,18 @@ impl<H> HookRunner<H> {
         Self { hooks }
     }
 }
-pub async fn run_test<'a, T, H>(t: &dyn Test<'a, T>, ctx: T, mut hooks: H) -> TestRes<'a>
+
+pub async fn run_test<'a, T, Args, H>(t: T, args: Args, mut hooks: H) -> TestRes<'a>
 where
-    H: Hooks<'static>
+    H: Hook<'static>,
+    T: Test<'a, Args>,
 {
     let pre_res = hooks.pre().await;
     // If the pre hook failed, return it as the test result, skipping test and post hook
     if let Status::Fail = pre_res.status {
         return pre_res
     }
-    let test_res = t.run(ctx).await;
+    let test_res = t.run(args).await;
     // If the test failed, return the result and don't run the post hook
     if let Status::Fail = test_res.status {
         return test_res
@@ -67,7 +68,7 @@ where
 impl<Args, H> FnT<Args> for HookRunner<H>
 where
     Args: Send + 'static,
-    H: Hooks<'static> + Unpin + Clone + Send + Sync,
+    H: Hook<'static> + Unpin + Clone + Send + Sync,
 {
     type Output = ();
     async fn call<T>(&self, args: Args) -> FnOut<Self, Args>
@@ -79,9 +80,7 @@ where
         let ctx = T::build(args).await;
         let tests = T::tests();
 
-        let mut test_res = tests.iter().map(|&t| {
-            run_test(t, ctx.clone(), self.hooks.clone())
-        });
+        let mut test_res = tests.iter().map(|&t| run_test(t, ctx.clone(), self.hooks.clone()));
 
         let mut pass = 0;
         let mut fail = 0;

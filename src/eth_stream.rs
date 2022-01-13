@@ -11,20 +11,20 @@ use std::ops::Deref;
 
 use crate::{
     core_stream::{Ctx, TestRes, TestSet},
-    hooks_stream::{HookRunner, Hooks},
+    hooks_stream::{HookRunner, Hook},
     types::{ChildTypes, ChildTypesFn, MapStep, MapT},
 };
 
 pub async fn start_eth<'a, M, I, C, Args>(args: Args)
 where
     C: Ctx<Base = Args> + TestSet<'a> + ChildTypesFn + DevRpcCtx + Unpin + Clone + Send + 'static,
-    ChildTypes<C>: MapStep<HookRunner<DevRpcHooks<C>>, C>,
+    ChildTypes<C>: MapStep<HookRunner<DevRpcHook<C>>, C>,
     C::Client: Deref<Target = DevRpcMiddleware<I>> + Unpin + Send + Sync,
     I: Middleware + Clone + 'static,
     Args: Send + 'static,
 {
     let init_ctx = C::build(args).await;
-    let hooks = DevRpcHooks::new(init_ctx.clone());
+    let hooks = DevRpcHook::new(init_ctx.clone());
     let runner = HookRunner::new(hooks);
     let iter = MapT::<_, _, ChildTypes<C>>::new(&runner, init_ctx);
     let mut stream = stream::iter(iter);
@@ -40,12 +40,12 @@ pub trait DevRpcCtx {
 }
 
 #[derive(Clone)]
-pub struct DevRpcHooks<Ctx: DevRpcCtx> {
+pub struct DevRpcHook<Ctx: DevRpcCtx> {
     snap_id: U256,
     client: <Ctx as DevRpcCtx>::Client,
 }
 
-impl<M, I, Ctx> DevRpcHooks<Ctx>
+impl<M, I, Ctx> DevRpcHook<Ctx>
 where
     M: Deref<Target = DevRpcMiddleware<I>> + Send + Sync + Clone,
     I: Middleware + Clone + 'static,
@@ -60,7 +60,7 @@ where
 }
 
 #[async_trait]
-impl<'a, M, I, Ctx> Hooks<'a> for DevRpcHooks<Ctx>
+impl<'a, M, I, Ctx> Hook<'a> for DevRpcHook<Ctx>
 where
     M: Deref<Target = DevRpcMiddleware<I>> + Send + Sync + Clone,
     I: Middleware + Clone + 'static,

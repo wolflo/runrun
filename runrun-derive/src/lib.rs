@@ -59,11 +59,3 @@ pub fn run_ctx(_attr: TokenStream, item: TokenStream) -> TokenStream {
     };
     res.into()
 }
-
-// #[proc_macro]
-// pub fn collect(input: TokenStream) -> TokenStream {
-//     let span = Span::call_site();
-//     // let x = span.source_file();
-//     // eprintln!("input: {:?}", x);
-//     "fn answer() -> u32 { 42 }".parse().unwrap()
-// }
