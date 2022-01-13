@@ -18,6 +18,18 @@ use crate::core_stream::MapBounds;
 pub struct TNil;
 #[derive(Debug, Clone, Copy)]
 pub struct TCons<H: ?Sized, T: ?Sized>(PhantomData<H>, PhantomData<T>);
+pub trait TList {
+    const LEN: usize;
+}
+impl<H, T> TList for TCons<H, T>
+where
+    T: TList,
+{
+    const LEN: usize = 1 + T::LEN;
+}
+impl TList for TNil {
+    const LEN: usize = 0;
+}
 
 // pub type BoxFuture<'fut, Y> = Pin<Box<dyn Future<Output = Y> + Send + 'fut>>;
 pub type AsyncFn<'fut, X, Y> = dyn Fn(X) -> BoxFuture<'fut, Y> + Send + Sync;
@@ -45,7 +57,7 @@ pub trait FnT<Args> {
     where
         Self: FnT<T>,
         T: MapBounds<Args>,
-        ChildTypes<T>: MapStep<Self, T>;
+        ChildTypes<T>: MapStep<Self, T> + TList;
 }
 
 // Given a TList and a function that maps each type in the TList to values of
@@ -59,6 +71,7 @@ where
 {
     pub f: &'a F,
     pub args: Args,
+    pub len: usize,
     next: fn(&'_ mut Self) -> Option<FnFut<'a, F, Args>>,
 }
 impl<'a, F, Args, Lst> Iterator for MapT<'a, F, Args, Lst>
@@ -71,15 +84,25 @@ where
         (self.next)(self)
     }
 }
+impl<'a, F, Args, Lst> ExactSizeIterator for MapT<'a, F, Args, Lst>
+where
+    F: FnT<Args>,
+    Lst: TList + ?Sized,
+{
+    fn len(&self) -> usize {
+        self.len
+    }
+}
 impl<'a, F, Args, Lst> MapT<'a, F, Args, Lst>
 where
     F: FnT<Args>,
-    Lst: ?Sized + MapStep<F, Args>,
+    Lst: ?Sized + MapStep<F, Args> + TList,
 {
     pub fn new(f: &'a F, args: Args) -> Self {
         Self {
             f,
             args,
+            len: Lst::LEN,
             next: |map| <Lst as MapStep<F, Args>>::step(map),
         }
     }
@@ -101,14 +124,15 @@ impl<F, Args, H, T> MapStep<F, Args> for TCons<H, T>
 where
     F: FnT<Args> + FnT<H>,
     Args: Clone,
-    T: MapStep<F, Args>,
+    T: MapStep<F, Args> + TList,
     H: MapBounds<Args>,
-    ChildTypes<H>: MapStep<F, H>,
+    ChildTypes<H>: MapStep<F, H> + TList,
 {
     fn step<'a, Lst>(map: &mut MapT<'a, F, Args, Lst>) -> Option<FnFut<'a, F, Args>>
     where
         Lst: ?Sized,
     {
+        map.len = T::LEN;
         map.next = |map| <T as MapStep<F, Args>>::step(map);
         Some(map.f.call::<H>(map.args.clone()))
     }
@@ -118,10 +142,11 @@ impl<F, Args> MapStep<F, Args> for TNil
 where
     F: FnT<Args>,
 {
-    fn step<'a, Lst>(_map: &mut MapT<'a, F, Args, Lst>) -> Option<FnFut<'a, F, Args>>
+    fn step<'a, Lst>(map: &mut MapT<'a, F, Args, Lst>) -> Option<FnFut<'a, F, Args>>
     where
         Lst: ?Sized,
     {
+        map.len = Self::LEN;
         None
     }
 }

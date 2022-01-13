@@ -9,13 +9,13 @@ use std::ops::Deref;
 use crate::{
     core_stream::{Ctx, TestRes, TestSet},
     hooks_stream::{Hook, HookRunner},
-    types::{ChildTypes, ChildTypesFn, MapStep, MapT},
+    types::{ChildTypes, ChildTypesFn, MapStep, MapT, TList},
 };
 
 pub async fn start_eth<'a, M, I, C, Args>(args: Args)
 where
     C: Ctx<Base = Args> + TestSet<'a> + ChildTypesFn + DevRpcCtx + Unpin + Clone + Send + 'static,
-    ChildTypes<C>: MapStep<HookRunner<DevRpcHook<C>>, C>,
+    ChildTypes<C>: MapStep<HookRunner<DevRpcHook<C>>, C> + TList,
     C::Client: Deref<Target = DevRpcMiddleware<I>> + Unpin + Send + Sync,
     I: Middleware + Clone + 'static,
     Args: Send + 'static,
