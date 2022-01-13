@@ -23,7 +23,8 @@ pub trait TList {
 }
 impl<H, T> TList for TCons<H, T>
 where
-    T: TList,
+    H: ?Sized,
+    T: TList + ?Sized,
 {
     const LEN: usize = 1 + T::LEN;
 }
@@ -57,48 +58,47 @@ pub trait FnT<Args> {
     where
         Self: FnT<T>,
         T: MapBounds<Args>,
-        ChildTypes<T>: MapStep<Self, T> + TList;
+        ChildTypes<T>: TList + MapStep<Self, T>;
 }
 
 // Given a TList and a function that maps each type in the TList to values of
 // the same type, we can map the function over the TList to generate an iterator.
 // Akin to std::iter::Map, except the function to be mapped is an FnT, meaning
 // it takes the next type in the TList as a type parameter to call<T>()
-pub struct MapT<'a, F, Args, Lst>
+pub struct MapT<'a, F, Args>
 where
     F: FnT<Args> + ?Sized,
-    Lst: ?Sized,
 {
     pub f: &'a F,
     pub args: Args,
     pub len: usize,
     next: fn(&'_ mut Self) -> Option<FnFut<'a, F, Args>>,
 }
-impl<'a, F, Args, Lst> Iterator for MapT<'a, F, Args, Lst>
+impl<'a, F, Args> Iterator for MapT<'a, F, Args>
 where
     F: FnT<Args>,
-    Lst: ?Sized,
 {
     type Item = FnFut<'a, F, Args>;
     fn next(&mut self) -> Option<Self::Item> {
         (self.next)(self)
     }
 }
-impl<'a, F, Args, Lst> ExactSizeIterator for MapT<'a, F, Args, Lst>
+impl<'a, F, Args> ExactSizeIterator for MapT<'a, F, Args>
 where
     F: FnT<Args>,
-    Lst: TList + ?Sized,
 {
     fn len(&self) -> usize {
         self.len
     }
 }
-impl<'a, F, Args, Lst> MapT<'a, F, Args, Lst>
+impl<'a, F, Args> MapT<'a, F, Args>
 where
     F: FnT<Args>,
-    Lst: ?Sized + MapStep<F, Args> + TList,
 {
-    pub fn new(f: &'a F, args: Args) -> Self {
+    pub fn new<Lst>(f: &'a F, args: Args) -> Self
+    where
+        Lst: TList + MapStep<F, Args> + ?Sized,
+    {
         Self {
             f,
             args,
@@ -112,26 +112,18 @@ pub trait MapStep<F, Args>
 where
     F: FnT<Args> + ?Sized,
 {
-    // Lst type param only serves to determine the type of the original TList
-    // to be mapped over. In practice, we care about the current position in
-    // the TList being mapped over, represented by the implementer of this trait.
-    fn step<'a, Lst>(map: &mut MapT<'a, F, Args, Lst>) -> Option<FnFut<'a, F, Args>>
-    where
-        Lst: ?Sized;
+    fn step<'a>(map: &mut MapT<'a, F, Args>) -> Option<FnFut<'a, F, Args>>;
 }
 
 impl<F, Args, H, T> MapStep<F, Args> for TCons<H, T>
 where
     F: FnT<Args> + FnT<H>,
     Args: Clone,
-    T: MapStep<F, Args> + TList,
+    T: TList + MapStep<F, Args>,
     H: MapBounds<Args>,
-    ChildTypes<H>: MapStep<F, H> + TList,
+    ChildTypes<H>: TList + MapStep<F, H>,
 {
-    fn step<'a, Lst>(map: &mut MapT<'a, F, Args, Lst>) -> Option<FnFut<'a, F, Args>>
-    where
-        Lst: ?Sized,
-    {
+    fn step<'a>(map: &mut MapT<'a, F, Args>) -> Option<FnFut<'a, F, Args>> {
         map.len = T::LEN;
         map.next = |map| <T as MapStep<F, Args>>::step(map);
         Some(map.f.call::<H>(map.args.clone()))
@@ -142,11 +134,15 @@ impl<F, Args> MapStep<F, Args> for TNil
 where
     F: FnT<Args>,
 {
-    fn step<'a, Lst>(map: &mut MapT<'a, F, Args, Lst>) -> Option<FnFut<'a, F, Args>>
-    where
-        Lst: ?Sized,
-    {
+    fn step<'a>(map: &mut MapT<'a, F, Args>) -> Option<FnFut<'a, F, Args>> {
         map.len = Self::LEN;
         None
+    }
+}
+
+pub trait ExactSizeStream: Stream {
+    fn len(&self) -> usize;
+    fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }

@@ -23,7 +23,7 @@ where
     let init_ctx = C::build(args).await;
     let hooks = DevRpcHook::new(init_ctx.clone());
     let runner = HookRunner::new(hooks);
-    let iter = MapT::<_, _, ChildTypes<C>>::new(&runner, init_ctx);
+    let iter = MapT::new::<ChildTypes<C>>(&runner, init_ctx);
     let mut stream = stream::iter(iter);
     while let Some(set) = stream.next().await {
         set.await;
