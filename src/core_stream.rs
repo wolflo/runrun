@@ -1,7 +1,8 @@
 use async_trait::async_trait;
+use futures::stream::Stream;
 use std::fmt::Debug;
 
-use crate::types::{AsyncFn, ChildTypesFn};
+use crate::types::{AsyncFn, ChildTypesFn, FnT, MapT};
 
 // Used by the MapT type to bound the types that can be mapped over. Ideally
 // we would be able to map an arbitrary FnT, but unfortunately we can only map
@@ -108,7 +109,7 @@ where
     }
 }
 #[async_trait]
-impl<'a, T, Args> Test<'a, Args> for &T
+impl<'a, T, Args> Test<'a, Args> for &'_ T
 where
     T: Test<'a, Args> + ?Sized + Send + Sync,
     Args: Send + Sync + 'static,
@@ -118,5 +119,44 @@ where
     }
     fn skip(&self) -> TestRes<'a> {
         (**self).skip()
+    }
+}
+#[async_trait]
+impl<'a, T, Args> Test<'a, Args> for &'_ mut T
+where
+    T: Test<'a, Args> + ?Sized + Send + Sync,
+    Args: Send + Sync + 'static,
+{
+    async fn run(&self, args: Args) -> TestRes<'a> {
+        (**self).run(args).await
+    }
+    fn skip(&self) -> TestRes<'a> {
+        (**self).skip()
+    }
+}
+#[async_trait]
+impl<'a, T, Args> Test<'a, Args> for Box<T>
+where
+    T: Test<'a, Args> + ?Sized + Send + Sync,
+    Args: Send + Sync + 'static,
+{
+    async fn run(&self, args: Args) -> TestRes<'a> {
+        (**self).run(args).await
+    }
+    fn skip(&self) -> TestRes<'a> {
+        (**self).skip()
+    }
+}
+#[async_trait]
+impl<'a, T, Args> Test<'a, Args> for std::panic::AssertUnwindSafe<T>
+where
+    T: Test<'a, Args> + Send + Sync,
+    Args: Send + Sync + 'static,
+{
+    async fn run(&self, args: Args) -> TestRes<'a> {
+        self.0.run(args).await
+    }
+    fn skip(&self) -> TestRes<'a> {
+        self.0.skip()
     }
 }
