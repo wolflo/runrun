@@ -46,14 +46,15 @@ pub trait ChildTypesFn {
 pub type FnOut<F, Args> = <F as FnT<Args>>::Output;
 // FnFut is the output type of an FnT, wrapped in a pinned future
 pub type FnFut<'fut, F, Args> = BoxFuture<'fut, FnOut<F, Args>>;
-// FnT is similar to the FnMut trait, but async and with a type parameter to call().
-// Sadly, we can't map an arbitrary function over a TList without GATs and
-// specialization, so we need to include all of the bounds for the runner
-// directly on the FnT trait.
-// https://willcrichton.net/notes/gats-are-hofs/
+
+// FnT is similar to the FnMut trait, but async and with a type parameter to call<T>().
+// Sadly, I don't think it's possible to map an arbitrary function over a TList
+// without GATs and specialization, so we need to include all of the bounds for
+// runners directly on the FnT trait. See https://willcrichton.net/notes/gats-are-hofs/
 #[async_trait]
 pub trait FnT<Args> {
     type Output;
+    // Returns Self::Output, but FnOut is needed to disambiguate
     async fn call<T>(&self, args: Args) -> FnOut<Self, Args>
     where
         Self: FnT<T>,
@@ -82,6 +83,9 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         (self.next)(self)
     }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.len, Some(self.len))
+    }
 }
 impl<'a, F, Args> ExactSizeIterator for MapT<'a, F, Args>
 where
@@ -103,7 +107,7 @@ where
             f,
             args,
             len: Lst::LEN,
-            next: |map| <Lst as MapStep<F, Args>>::step(map),
+            next: |map| Lst::step(map),
         }
     }
 }
@@ -125,7 +129,7 @@ where
 {
     fn step<'a>(map: &mut MapT<'a, F, Args>) -> Option<FnFut<'a, F, Args>> {
         map.len = T::LEN;
-        map.next = |map| <T as MapStep<F, Args>>::step(map);
+        map.next = |map| T::step(map);
         Some(map.f.call::<H>(map.args.clone()))
     }
 }
@@ -134,8 +138,7 @@ impl<F, Args> MapStep<F, Args> for TNil
 where
     F: FnT<Args>,
 {
-    fn step<'a>(map: &mut MapT<'a, F, Args>) -> Option<FnFut<'a, F, Args>> {
-        map.len = Self::LEN;
+    fn step<'a>(_: &mut MapT<'a, F, Args>) -> Option<FnFut<'a, F, Args>> {
         None
     }
 }
