@@ -16,18 +16,84 @@ impl<T, Args> MapBounds<Args> for T where
 {
 }
 
+pub enum Mode {
+    Run,
+    Skip,
+}
+impl Mode {
+    pub fn is_run(&self) -> bool {
+        match self {
+            Self::Run => true,
+            _ => false,
+        }
+    }
+    pub fn is_skip(&self) -> bool {
+        match self {
+            Self::Skip => true,
+            _ => false,
+        }
+    }
+}
+pub struct BaseRunner<I> {
+    iter: I,
+}
+impl<I> BaseRunner<I> {
+    pub fn new(iter: I) -> Self {
+        Self {
+            iter,
+        }
+    }
+}
+#[async_trait]
+impl<I, In, Out> Runner<In, Out> for BaseRunner<I>
+where
+    I: Iterator + Send,
+    I::Item: Test<In, Out>,
+    In: Send + 'static,
+    Out: Default,
+{
+    async fn next(&mut self, mode: Mode, args: In) -> Option<Out> {
+        match self.iter.next() {
+            Some(t) => match mode {
+                Mode::Run => Some(t.run(args).await),
+                Mode::Skip => Some(t.skip()),
+            },
+            None => None,
+        }
+    }
+}
+impl<I> ExactSize for BaseRunner<I>
+where
+    I: ExactSizeIterator,
+{
+    fn len(&self) -> usize {
+        self.iter.len()
+    }
+}
+
+#[async_trait]
+pub trait Runner<In, Out> {
+    async fn next(&mut self, mode: Mode, args: In) -> Option<Out>;
+}
+pub trait ExactSize {
+    fn len(&self) -> usize;
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
 #[async_trait]
 pub trait Ctx {
     type Base;
     async fn build(base: Self::Base) -> Self;
 }
 pub trait TestSet<'a> {
-    fn tests() -> &'a [&'a dyn Test<'a, Self>];
+    fn tests() -> &'a [&'a dyn Test<Self, TestRes<'a>>];
 }
 #[async_trait]
-pub trait Test<'a, Args>: Send + Sync {
-    async fn run(&self, args: Args) -> TestRes<'a>;
-    fn skip(&self) -> TestRes<'a> {
+pub trait Test<In, Out>: Send + Sync where Out: Default {
+    async fn run(&self, args: In) -> Out;
+    fn skip(&self) -> Out {
         Default::default()
     }
 }
@@ -78,25 +144,25 @@ impl Default for TestRes<'_> {
 }
 
 #[derive(Clone)]
-pub struct TestCase<'a, Args, Res> {
+pub struct TestCase<'a, In, Out> {
     pub name: &'static str,
-    pub test: &'a AsyncFn<'a, Args, Res>,
+    pub test: &'a AsyncFn<'a, In, Out>,
 }
 #[async_trait]
-impl<'a, Args, Res> Test<'a, Args> for TestCase<'_, Args, Res>
+impl<'a, In, Out> Test<In, Out> for TestCase<'_, In, Out>
 where
-    Args: Send + Sync + 'static,
-    Res: Test<'a, ()>, // could also pass args to result.run()
+    In: Send + Sync + 'static,
+    Out: Test<(), Out> + Default, // could also pass args to result.run()
 {
-    async fn run(&self, args: Args) -> TestRes<'a> {
+    async fn run(&self, args: In) -> Out {
         println!("{}", self.name);
         (self.test)(args).await.run(()).await
     }
 }
 // () is a trivially passing Test
 #[async_trait]
-impl<'a, Args: Send + 'static> Test<'a, Args> for () {
-    async fn run(&self, _args: Args) -> TestRes<'a> {
+impl<'a, In> Test<In, TestRes<'a>> for () where In: Send + 'static {
+    async fn run(&self, _args: In) -> TestRes<'a> {
         TestRes {
             status: Status::Pass,
             trace: &"",
@@ -105,20 +171,20 @@ impl<'a, Args: Send + 'static> Test<'a, Args> for () {
 }
 // true is a passing Test, false is a failing Test
 #[async_trait]
-impl<'a, Args: Send + 'static> Test<'a, Args> for bool {
-    async fn run(&self, _args: Args) -> TestRes<'a> {
+impl<'a, In> Test<In, TestRes<'a>> for bool where In: Send + 'static {
+    async fn run(&self, _args: In) -> TestRes<'a> {
         let status = if *self { Status::Pass } else { Status::Fail };
         TestRes { status, trace: &"" }
     }
 }
 #[async_trait]
-impl<'a, T, E, Args> Test<'a, Args> for Result<T, E>
+impl<'a, T, E, In> Test<In, TestRes<'a>> for Result<T, E>
 where
-    T: Test<'a, Args> + Send + Sync,
+    T: Test<In, TestRes<'a>> + Send + Sync,
     E: Into<Box<dyn std::error::Error>> + Send + Sync + 'a,
-    Args: Send + Sync + 'static,
+    In: Send + Sync + 'static,
 {
-    async fn run(&self, args: Args) -> TestRes<'a> {
+    async fn run(&self, args: In) -> TestRes<'a> {
         match self {
             Ok(r) => r.run(args).await,
             Err(e) => TestRes {
@@ -129,54 +195,58 @@ where
     }
 }
 #[async_trait]
-impl<'a, T, Args> Test<'a, Args> for &'_ T
+impl<T, In, Out> Test<In, Out> for &'_ T
 where
-    T: Test<'a, Args> + ?Sized + Send + Sync,
-    Args: Send + Sync + 'static,
+    T: Test<In, Out> + ?Sized + Send + Sync,
+    In: Send + Sync + 'static,
+    Out: Default,
 {
-    async fn run(&self, args: Args) -> TestRes<'a> {
+    async fn run(&self, args: In) -> Out {
         (**self).run(args).await
     }
-    fn skip(&self) -> TestRes<'a> {
+    fn skip(&self) -> Out {
         (**self).skip()
     }
 }
 #[async_trait]
-impl<'a, T, Args> Test<'a, Args> for &'_ mut T
+impl<T, In, Out> Test<In, Out> for &'_ mut T
 where
-    T: Test<'a, Args> + ?Sized + Send + Sync,
-    Args: Send + Sync + 'static,
+    T: Test<In, Out> + ?Sized + Send + Sync,
+    In: Send + Sync + 'static,
+    Out: Default
 {
-    async fn run(&self, args: Args) -> TestRes<'a> {
+    async fn run(&self, args: In) -> Out {
         (**self).run(args).await
     }
-    fn skip(&self) -> TestRes<'a> {
+    fn skip(&self) -> Out {
         (**self).skip()
     }
 }
 #[async_trait]
-impl<'a, T, Args> Test<'a, Args> for Box<T>
+impl<T, In, Out> Test<In, Out> for Box<T>
 where
-    T: Test<'a, Args> + ?Sized + Send + Sync,
-    Args: Send + Sync + 'static,
+    T: Test<In, Out> + ?Sized + Send + Sync,
+    In: Send + Sync + 'static,
+    Out: Default,
 {
-    async fn run(&self, args: Args) -> TestRes<'a> {
+    async fn run(&self, args: In) -> Out {
         (**self).run(args).await
     }
-    fn skip(&self) -> TestRes<'a> {
+    fn skip(&self) -> Out {
         (**self).skip()
     }
 }
 #[async_trait]
-impl<'a, T, Args> Test<'a, Args> for std::panic::AssertUnwindSafe<T>
+impl<T, In, Out> Test<In, Out> for std::panic::AssertUnwindSafe<T>
 where
-    T: Test<'a, Args> + Send + Sync,
-    Args: Send + Sync + 'static,
+    T: Test<In, Out> + Send + Sync,
+    In: Send + Sync + 'static,
+    Out: Default,
 {
-    async fn run(&self, args: Args) -> TestRes<'a> {
+    async fn run(&self, args: In) -> Out {
         self.0.run(args).await
     }
-    fn skip(&self) -> TestRes<'a> {
+    fn skip(&self) -> Out {
         self.0.skip()
     }
 }

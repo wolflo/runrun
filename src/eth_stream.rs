@@ -57,7 +57,7 @@ where
 }
 
 #[async_trait]
-impl<'a, M, I, Ctx> Hook<'a> for DevRpcHook<Ctx>
+impl<'a, M, I, Ctx> Hook<TestRes<'a>> for DevRpcHook<Ctx>
 where
     M: Deref<Target = DevRpcMiddleware<I>> + Send + Sync + Clone,
     I: Middleware + Clone + 'static,
