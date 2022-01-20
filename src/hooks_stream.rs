@@ -14,42 +14,31 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Copy, Default)]
-pub struct NoHook;
+pub struct NoHook<T>(PhantomData<T>);
 #[async_trait]
-impl<'a> Hook<'a> for NoHook {
-    async fn pre(&mut self) -> TestRes<'a> {
-        Default::default()
-    }
-    async fn post(&mut self) -> TestRes<'a> {
-        Default::default()
-    }
-}
-#[async_trait]
-impl<T> HookT<T> for NoHook
+impl<T> Hook for NoHook<T>
 where
-    T: Default,
+    T: Default + Send,
 {
-    async fn pre(&mut self) -> (T, &mut Self) {
-        println!("Running NoHook pre.");
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        (Default::default(), self)
+    type Output = T;
+    async fn pre(&mut self) -> Self::Output {
+        Default::default()
     }
-    async fn post(&mut self) -> (T, &mut Self) {
-        println!("Running NoHook post.");
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        (Default::default(), self)
+    async fn post(&mut self) -> Self::Output {
+        Default::default()
     }
 }
-impl NoHook {
+impl<T> NoHook<T> {
     pub fn new() -> Self {
-        Self
+        Self(PhantomData)
     }
 }
 
 #[async_trait]
-pub trait Hook<'a> {
-    async fn pre(&mut self) -> TestRes<'a>;
-    async fn post(&mut self) -> TestRes<'a>;
+pub trait Hook {
+    type Output;
+    async fn pre(&mut self) -> Self::Output;
+    async fn post(&mut self) -> Self::Output;
 }
 #[derive(Debug, Clone)]
 pub struct HookRunner<H> {
@@ -59,31 +48,6 @@ impl<H> HookRunner<H> {
     pub fn new(hook: H) -> Self {
         Self { hook }
     }
-}
-
-pub async fn run_test<'a, T, Args, H>(t: T, args: Args, mut hook: H) -> TestRes<'a>
-where
-    H: Hook<'a>,
-    T: Test<'a, Args>,
-{
-    // let (_, pre_res) = hook.pre().await;
-    let pre_res = hook.pre().await;
-    // If the pre hook failed, return it as the test result, skipping test and post hook
-    if let Status::Fail = pre_res.status {
-        return pre_res;
-    }
-    let test_res = t.run(args).await;
-    // If the test failed, return the result and don't run the post hook
-    if let Status::Fail = test_res.status {
-        return test_res;
-    }
-    let post_res = hook.post().await;
-    // If the test passed but the post hook failed, return the post hook failure
-    if let Status::Fail = post_res.status {
-        return post_res;
-    }
-    // Everything passed. Return the test result
-    test_res
 }
 
 // run() -> Stream<Item = TestRes>
@@ -99,7 +63,7 @@ where
 impl<Args, H> FnT<Args> for HookRunner<H>
 where
     Args: Send + 'static,
-    H: Hook<'static> + Unpin + Clone + Send + Sync,
+    H: Hook<Output = TestRes<'static>> + Unpin + Clone + Send + Sync,
     // H: Hook<TestRes<'static>> + Unpin + Clone + Send + Sync,
 {
     type Output = ();
@@ -112,43 +76,21 @@ where
         let ctx = T::build(args).await;
         let tests = T::tests();
 
-        // let mut test_res = stream::iter(
-        //     tests.iter().map(|&t| t.run(ctx.clone())), // .map(|&t| run_test(t, ctx.clone(), self.hook.clone())),
-        // );
-        // turn an iterator of Tests into a stream of TestRes. Probably a cleaner way to do this
-        let test_res = tests.iter().map(|t| t.run(ctx.clone()));
-        let mut stream = stream::unfold(test_res, |mut iter| async move {
-            match iter.next() {
-                Some(t) => Some((t.await, iter)),
-                None => None,
-            }
-        })
-        .boxed();
-
-        let mut hook = NoHook::new();
-        let mut hooks = HookStream::new(stream, &mut hook);
-        if let State::Init(_) = hooks.state {
-            println!("Some!");
-        }
-        let foo = hooks.next().await;
-        match hooks.state {
-            State::Init(_) => println!("state is init"),
-            State::Wait(_) => println!("state is wait"),
-        }
-
-        // let mut wrap = Wrap::new(stream, || async { tokio::time::sleep(tokio::time::Duration::from_secs(3)).await; Default::default() }).boxed();
-        // let mut wrap = Wrap::new(stream, NoHook, || async { tokio::time::sleep(tokio::time::Duration::from_secs(3)).await; Default::default() }).boxed();
-
+        let mut inner = BaseRunner::new(tests.iter());
+        let mut runner = HookRunner2 {
+            inner,
+            hook: self.hook.clone(),
+        };
         let mut pass = 0;
         let mut fail = 0;
         let mut skip = 0;
-        // while let Some(res) = wrap.next().await {
-        //     match res.status {
-        //         Status::Pass => pass += 1,
-        //         Status::Fail => fail += 1,
-        //         Status::Skip => skip += 1,
-        //     }
-        // }
+        while let Some(res) = runner.next(Mode::Run, ctx.clone()).await {
+            match res.status {
+                Status::Pass => pass += 1,
+                Status::Fail => fail += 1,
+                Status::Skip => skip += 1,
+            }
+        }
         println!("tests passed : {}", pass);
         println!("tests failed : {}", fail);
         println!("tests skipped: {}", skip);
@@ -156,6 +98,111 @@ where
         let child_iter = MapT::new::<ChildTypes<T>>(self, ctx.clone());
         let mut child_stream = stream::iter(child_iter);
         while let Some(_) = child_stream.next().await {}
+    }
+}
+
+pub enum Mode {
+    Run,
+    Skip,
+}
+impl Mode {
+    pub fn is_run(&self) -> bool {
+        match self {
+            Self::Run => true,
+            _ => false,
+        }
+    }
+    pub fn is_skip(&self) -> bool {
+        match self {
+            Self::Skip => true,
+            _ => false,
+        }
+    }
+}
+#[async_trait]
+pub trait Runner<Args> {
+    type Output;
+    async fn next(&mut self, mode: Mode, args: Args) -> Option<Self::Output>;
+}
+pub trait ExactSize {
+    fn len(&self) -> usize;
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+struct BaseRunner<'a, I> {
+    iter: I,
+    _tick: PhantomData<&'a u8>,
+}
+impl<'a, I> BaseRunner<'a, I> {
+    pub fn new(iter: I) -> Self {
+        Self {
+            iter,
+            _tick: PhantomData,
+        }
+    }
+}
+#[async_trait]
+impl<'a, I, Args> Runner<Args> for BaseRunner<'a, I>
+where
+    I: Iterator + Send,
+    I::Item: Test<'a, Args>,
+    Args: Send + 'static,
+{
+    type Output = TestRes<'a>;
+    async fn next(&mut self, mode: Mode, args: Args) -> Option<Self::Output> {
+        match self.iter.next() {
+            Some(t) => match mode {
+                Mode::Run => Some(t.run(args).await),
+                Mode::Skip => Some(t.skip()),
+            },
+            None => None,
+        }
+    }
+}
+impl<'a, I> ExactSize for BaseRunner<'a, I>
+where
+    I: ExactSizeIterator,
+{
+    fn len(&self) -> usize {
+        self.iter.len()
+    }
+}
+struct HookRunner2<I, H> {
+    inner: I,
+    hook: H,
+}
+#[async_trait]
+impl<'a, I, H, Args> Runner<Args> for HookRunner2<I, H>
+where
+    I: Runner<Args, Output = TestRes<'a>> + ExactSize + Send,
+    H: Hook<Output = TestRes<'a>> + Send,
+    Args: Send + 'static,
+{
+    type Output = I::Output;
+    async fn next(&mut self, mode: Mode, args: Args) -> Option<Self::Output> {
+        if self.inner.is_empty() {
+            return self.inner.next(mode, args).await;
+        }
+        let pre = self.hook.pre().await;
+        if pre.status.is_fail() {
+            return Some(pre);
+        }
+        let test = self.inner.next(mode, args).await.unwrap();
+        let post = self.hook.post().await;
+        if !test.status.is_fail() && post.status.is_fail() {
+            Some(post)
+        } else {
+            Some(test)
+        }
+    }
+}
+impl<I, H> ExactSize for HookRunner2<I, H>
+where
+    I: ExactSize,
+{
+    fn len(&self) -> usize {
+        self.inner.len()
     }
 }
 
@@ -494,4 +541,45 @@ where
 //     fn len(&self) -> usize {
 //         self.iter.len()
 //     }
+// }
+// #[async_trait]
+// impl<T> HookT<T> for NoHook
+// where
+//     T: Default,
+// {
+//     async fn pre(&mut self) -> (T, &mut Self) {
+//         println!("Running NoHook pre.");
+//         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+//         (Default::default(), self)
+//     }
+//     async fn post(&mut self) -> (T, &mut Self) {
+//         println!("Running NoHook post.");
+//         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+//         (Default::default(), self)
+//     }
+// }
+
+// pub async fn run_test<'a, T, Args, H>(t: T, args: Args, mut hook: H) -> TestRes<'a>
+// where
+//     H: Hook<'a>,
+//     T: Test<'a, Args>,
+// {
+//     // let (_, pre_res) = hook.pre().await;
+//     let pre_res = hook.pre().await;
+//     // If the pre hook failed, return it as the test result, skipping test and post hook
+//     if let Status::Fail = pre_res.status {
+//         return pre_res;
+//     }
+//     let test_res = t.run(args).await;
+//     // If the test failed, return the result and don't run the post hook
+//     if let Status::Fail = test_res.status {
+//         return test_res;
+//     }
+//     let post_res = hook.post().await;
+//     // If the test passed but the post hook failed, return the post hook failure
+//     if let Status::Fail = post_res.status {
+//         return post_res;
+//     }
+//     // Everything passed. Return the test result
+//     test_res
 // }
