@@ -42,6 +42,26 @@ pub enum Status {
     Fail,
     Skip,
 }
+impl Status {
+    pub fn is_pass(&self) -> bool {
+        match self {
+            Self::Pass => true,
+            _ => false,
+        }
+    }
+    pub fn is_fail(&self) -> bool {
+        match self {
+            Self::Fail => true,
+            _ => false,
+        }
+    }
+    pub fn is_skip(&self) -> bool {
+        match self {
+            Self::Skip => true,
+            _ => false,
+        }
+    }
+}
 
 impl Default for Status {
     fn default() -> Self {

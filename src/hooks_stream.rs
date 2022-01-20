@@ -86,6 +86,15 @@ where
     test_res
 }
 
+// run() -> Stream<Item = TestRes>
+// skip() -> Stream<Item = TestRes>
+// A Driver aggregates tests.
+// A Runner turns an iterator of tests into a stream of test reseults (running hooks if needed).
+//  but then how to run hooks before a batch of tests?
+//  so, A Run/Crank/Block implements Stream and Skip
+//  I kind of want everything to return a stream of TestRes, but I want to decide
+//  at each level whether that is from skip() or run()
+// A Stat takes a stream of test results and agregates them into some report.
 #[async_trait]
 impl<Args, H> FnT<Args> for HookRunner<H>
 where
@@ -150,11 +159,120 @@ where
     }
 }
 
+struct Skip;
+struct Run;
+#[pin_project]
+struct HookRunner1<'a, I, Args, H> {
+    iter: I,
+    args: Args,
+    skip: bool,
+    #[pin]
+    state: State1<'a, H>,
+}
+#[pin_project(project = StateProj1)]
+enum State1<'a, H> {
+    Init(Once<&'a mut H>),
+    Wait(#[pin] Wait1<'a, H>),
+}
+enum Once<T> {
+    Just(T),
+    Unreachable,
+}
+impl<T> Once<T> {
+    pub fn take(&mut self) -> T {
+        std::mem::replace(self, Self::Unreachable)
+            .expect("Attempted to take a Once::Unreachable. This is bad.")
+    }
+    pub fn expect(self, msg: &str) -> T {
+        match self {
+            Self::Just(val) => val,
+            Self::Unreachable => panic!("{}", msg),
+        }
+    }
+}
+#[pin_project(project = WaitProj1)]
+enum Wait1<'a, H> {
+    Pre(#[pin] BoxFuture<'a, (TestRes<'a>, &'a mut H)>),
+    Test(#[pin] BoxFuture<'a, TestRes<'a>>, Once<&'a mut H>),
+    Post(
+        #[pin] BoxFuture<'a, (TestRes<'a>, &'a mut H)>,
+        Once<TestRes<'a>>,
+    ),
+}
+impl<'a, I, Args, H> Stream for HookRunner1<'a, I, Args, H>
+where
+    I: Iterator<Item = &'a dyn Test<'a, Args>>,
+    H: HookT<TestRes<'a>>,
+    Args: Clone + 'a,
+{
+    type Item = TestRes<'a>;
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        let test = match self.iter.next() {
+            Some(next) => next,
+            None => return Poll::Ready(None),
+        };
+        if self.skip {
+            return Poll::Ready(Some(test.skip()));
+        }
+
+        let mut this = self.as_mut().project();
+        Poll::Ready(loop {
+            match this.state.as_mut().project() {
+                StateProj1::Init(ref mut h) => {
+                    let fut = h.take().pre();
+                    this.state.set(State1::Wait(Wait1::Pre(fut)));
+                }
+                StateProj1::Wait(ref mut wait) => {
+                    match wait.as_mut().project() {
+                        WaitProj1::Pre(fut) => {
+                            let (res, h) = ready!(fut.poll(cx));
+                            if res.status.is_fail() {
+                                let _skip = test.skip();
+                                break Some(res);
+                            }
+                            let run = test.run(this.args.clone());
+                            this.state
+                                .set(State1::Wait(Wait1::Test(run, Once::Just(h))));
+                        }
+                        WaitProj1::Test(fut, ref mut h) => {
+                            let res = ready!(fut.poll(cx));
+                            let post = h.take().post();
+                            this.state
+                                .set(State1::Wait(Wait1::Post(post, Once::Just(res))));
+                        }
+                        WaitProj1::Post(fut, test_res) => {
+                            let (post_res, h) = ready!(fut.poll(cx));
+                            // Setting state before touching test_res angers the borrow checker
+                            let test_res = test_res.take();
+                            this.state.set(State1::Init(Once::Just(h)));
+                            if !test_res.status.is_fail() && post_res.status.is_fail() {
+                                break Some(post_res);
+                            } else {
+                                break Some(test_res);
+                            }
+                        }
+                    }
+                }
+            }
+        })
+    }
+}
+
+#[async_trait]
+pub trait Block<Args, Res> {
+    async fn runs(&mut self, args: Args) -> &dyn Stream<Item = Res>;
+    async fn skips(&mut self, args: Args) -> &dyn Stream<Item = Res>;
+}
+
 #[async_trait]
 pub trait HookT<T> {
     async fn pre(&mut self) -> (T, &mut Self);
     async fn post(&mut self) -> (T, &mut Self);
 }
+
 #[pin_project(project = HookFutProj)]
 enum HookFut<Fut> {
     None,
@@ -232,40 +350,6 @@ where
                 },
             }
         })
-        // Poll::Ready(loop {
-        //     let mut this = self.as_mut().project();
-        //     let mut state = this.state.as_mut().project();
-        //     // match this.state.as_ref().project() {
-        //     match state {
-        //         StateProj::Init(ref mut h) => {
-        //             let fut = h.pre();
-        //             // state.as_mut().as_pin_mut().set(State::None);
-        //             // this.state.set(State::None);
-        //             state.set(State::None);
-        //             // *this.state = State::Wait(Wait::Pre(fut));
-        //         },
-        //         StateProj::Wait(ref wait) => {
-        //             // match wait.project() {
-        //             //     WaitProj::Pre(mut fut) => {
-        //             //         let (h, _res) = ready!(fut.as_mut().poll(cx));
-        //             //         // *this.state = State::Wait(Wait::Test(h));
-        //             //         // back to top
-        //             //     },
-        //             //     WaitProj::Test(h) => {
-        //             //         let res = ready!(this.stream.as_mut().poll_next(cx));
-        //             //         let fut = h.post();
-        //             //         // *this.state = State::Wait(Wait::Post(fut));
-        //             //     },
-        //             //     WaitProj::Post(mut fut) => {
-        //             //         let (h, res) = ready!(fut.as_mut().poll(cx));
-        //             //         // *this.state = State::Init(h);
-        //             //         break Some(res)
-        //             //     },
-        //             // }
-        //         },
-        //         _ => todo!(),
-        //     }
-        // })
     }
 }
 
