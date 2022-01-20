@@ -27,7 +27,7 @@ pub fn run_test(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let res = quote! {
         const _: () = {
             #[linkme::distributed_slice(#tests_id)]
-            static __: &dyn runrun::core_stream::Test<'static, #state_on> = &runrun::core_stream::TestCase { name: stringify!(#name), test: &|ctx| Box::pin(#name(ctx)) };
+            static __: &dyn runrun::core_stream::Test<#state_on, runrun::core_stream::TestRes<'static>> = &runrun::core_stream::TestCase { name: stringify!(#name), test: &|ctx| Box::pin(#name(ctx)) };
         };
         #input
     };
@@ -48,10 +48,10 @@ pub fn run_ctx(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let res = quote! {
         #[linkme::distributed_slice]
-        pub static #tests_id: [&'static dyn runrun::core_stream::Test<'static, #state_on>] = [..];
+        pub static #tests_id: [&'static dyn runrun::core_stream::Test<#state_on, runrun::core_stream::TestRes<'static>>] = [..];
 
         impl runrun::core_stream::TestSet<'static> for #state_on {
-            fn tests() -> &'static [&'static dyn runrun::core_stream::Test<'static, Self>] {
+            fn tests() -> &'static [&'static dyn runrun::core_stream::Test<Self, runrun::core_stream::TestRes<'static>>] {
                 &#tests_id
             }
         }
