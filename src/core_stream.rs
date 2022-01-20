@@ -149,10 +149,11 @@ pub struct TestCase<'a, In, Out> {
     pub test: &'a AsyncFn<'a, In, Out>,
 }
 #[async_trait]
-impl<'a, In, Out> Test<In, Out> for TestCase<'_, In, Out>
+impl<'a, In, Out, Y> Test<In, Out> for TestCase<'_, In, Y>
 where
     In: Send + Sync + 'static,
-    Out: Test<(), Out> + Default, // could also pass args to result.run()
+    Y: Test<(), Out>, // could also pass args to result.run()
+    Out: Default,
 {
     async fn run(&self, args: In) -> Out {
         println!("{}", self.name);
@@ -190,6 +191,15 @@ where
             Err(e) => TestRes {
                 status: Status::Fail,
                 trace: &"Test of Err value. We should provide real traces for these.", // trace: (*e).clone().into(),
+            },
+        }
+    }
+    fn skip(&self) -> TestRes<'a> {
+        match self {
+            Ok(r) => r.skip(),
+            Err(e) => TestRes {
+                status: Status::Fail,
+                trace: &"Skip of Err value. We should provide real traces for these.", // trace: (*e).clone().into(),
             },
         }
     }
