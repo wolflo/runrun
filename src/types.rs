@@ -14,6 +14,11 @@ use std::{
 
 use crate::core_stream::MapBounds;
 
+pub type Head<T> = <T as HeadFn>::Out;
+pub trait HeadFn { type Out; }
+impl<H, T> HeadFn for TCons<H, T> { type Out = H; }
+
+
 #[derive(Debug, Clone, Copy)]
 pub struct TNil;
 #[derive(Debug, Clone, Copy)]

@@ -12,7 +12,7 @@ pub trait MapBounds<Args>:
 {
 }
 impl<T, Args> MapBounds<Args> for T where
-    T: Ctx<Base = Args> + TestSet<'static> + ChildTypesFn + Unpin + Clone + Send + Sync + 'static
+    T: Ctx<Base = Args> + TestSet<'static> + ChildTypesFn + Unpin + Clone + Send + Sync + 'static // T: Ctx<Base = Args> + TestSet<'static> + ChildTypesFn + Unpin + Clone + Send + Sync + 'static
 {
 }
 
@@ -39,8 +39,24 @@ pub struct BaseRunner<I> {
 }
 impl<I> BaseRunner<I> {
     pub fn new(iter: I) -> Self {
-        Self {
-            iter,
+        Self { iter }
+    }
+}
+#[async_trait]
+impl<T, In, Out> Runner<In, Out> for T
+where
+    T: Iterator + Send,
+    T::Item: Test<In, Out>,
+    In: Send + 'static,
+    Out: Default,
+{
+    async fn step(&mut self, mode: Mode, args: In) -> Option<Out> {
+        match self.next() {
+            Some(t) => match mode {
+                Mode::Run => Some(t.run(args).await),
+                Mode::Skip => Some(t.skip()),
+            },
+            None => None,
         }
     }
 }
@@ -52,7 +68,7 @@ where
     In: Send + 'static,
     Out: Default,
 {
-    async fn next(&mut self, mode: Mode, args: In) -> Option<Out> {
+    async fn step(&mut self, mode: Mode, args: In) -> Option<Out> {
         match self.iter.next() {
             Some(t) => match mode {
                 Mode::Run => Some(t.run(args).await),
@@ -70,11 +86,88 @@ where
         self.iter.len()
     }
 }
+impl<T> ExactSize for T
+where
+    T: ExactSizeIterator,
+{
+    fn len(&self) -> usize {
+        self.len()
+    }
+}
+// impl<A, B> ExactSize for std::iter::Chain<A, B>
+// where
+//     A: ExactSizeIterator,
+//     B: ExactSizeIterator,
+// {
+//     fn len(&self) -> usize {
+//         self.a.len() + self.b.len()
+//     }
+// }
 
+// An iterator where the type of the thing it returns is tied to the type of the args passed to next()
+
+// async fn step<In>(&mut self, mode: Mode, args: In) -> Option<Out>;
 #[async_trait]
 pub trait Runner<In, Out> {
-    async fn next(&mut self, mode: Mode, args: In) -> Option<Out>;
+    async fn step(&mut self, mode: Mode, args: In) -> Option<Out>;
 }
+// Every Runner wraps another Runner (with the innermost Runner being an iterator).
+// Given a new runner, make a new version of myself that wraps this new runner
+pub trait RunnerBuilder<Out> {
+    type This<A, B>: Send
+    where
+        A: Runner<B, Out> + Send;
+    fn build<A, B>(&self, a: A) -> Self::This<A, B>
+    where
+        A: Runner<B, Out> + Send;
+    // type This<A, B>: Runner<B, Out> + Send where A: Runner<B, Out> + ExactSize + Send, B: Send + 'static;
+    // fn build<A, B>(&self, a: A) -> Self::This<A, B> where A: Runner<B, Out> + ExactSize + Send, B: Send + 'static;
+}
+// Given a set of tests (or an inner Runner), build a Runner
+#[async_trait]
+pub trait RBB {
+    type Out;
+
+    type R<I, In>: Runner<In, Self::Out> + Send
+    where
+        I: Runner<In, Self::Out> + ExactSize + Send,
+        In: Send + 'static;
+
+    async fn new<I, In>(&self, inner: I) -> Self::R<I, In>
+    where
+        I: Runner<In, Self::Out> + ExactSize + Send,
+        In: Send + 'static;
+}
+pub trait FooBar {
+    type Assoc<T>
+    where
+        Self: Sized;
+}
+// * -> *
+pub trait Builder {
+    type This<A>; // A is the type the Builder is applied to
+}
+pub trait Functor: Builder {
+    // map (<$>) :: f a -> (a -> b) -> f b
+    fn map<A, B, F>(self, fa: Self::This<A>, f: F) -> Self::This<B>
+    where
+        F: Fn(A) -> B;
+    fn map_const<A, B>(self, fa: Self::This<A>, b: B) -> Self::This<B>;
+}
+pub trait Link<I> {
+    fn link(&mut self, iter: I);
+}
+// impl<T> Iterator for BaseRunner<T> where T: Iterator {
+//     type Item = T::Item;
+//     fn next(&mut self) -> Option<Self::Item> {
+//         self.iter.next()
+//     }
+// }
+// impl<T, U> Link<U> for BaseRunner<T> where T: Extend<U::Item>, U: IntoIterator {
+//     fn link(&mut self, iter: U) {
+//         self.iter.extend(iter);
+//     }
+// }
 pub trait ExactSize {
     fn len(&self) -> usize;
     fn is_empty(&self) -> bool {
@@ -91,7 +184,10 @@ pub trait TestSet<'a> {
     fn tests() -> &'a [&'a dyn Test<Self, TestRes<'a>>];
 }
 #[async_trait]
-pub trait Test<In, Out>: Send + Sync where Out: Default {
+pub trait Test<In, Out>: Send + Sync
+where
+    Out: Default,
+{
     async fn run(&self, args: In) -> Out;
     fn skip(&self) -> Out {
         Default::default()
@@ -162,7 +258,10 @@ where
 }
 // () is a trivially passing Test
 #[async_trait]
-impl<'a, In> Test<In, TestRes<'a>> for () where In: Send + 'static {
+impl<'a, In> Test<In, TestRes<'a>> for ()
+where
+    In: Send + 'static,
+{
     async fn run(&self, _args: In) -> TestRes<'a> {
         TestRes {
             status: Status::Pass,
@@ -172,7 +271,10 @@ impl<'a, In> Test<In, TestRes<'a>> for () where In: Send + 'static {
 }
 // true is a passing Test, false is a failing Test
 #[async_trait]
-impl<'a, In> Test<In, TestRes<'a>> for bool where In: Send + 'static {
+impl<'a, In> Test<In, TestRes<'a>> for bool
+where
+    In: Send + 'static,
+{
     async fn run(&self, _args: In) -> TestRes<'a> {
         let status = if *self { Status::Pass } else { Status::Fail };
         TestRes { status, trace: &"" }
@@ -223,7 +325,7 @@ impl<T, In, Out> Test<In, Out> for &'_ mut T
 where
     T: Test<In, Out> + ?Sized + Send + Sync,
     In: Send + Sync + 'static,
-    Out: Default
+    Out: Default,
 {
     async fn run(&self, args: In) -> Out {
         (**self).run(args).await

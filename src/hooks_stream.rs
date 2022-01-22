@@ -39,68 +39,270 @@ pub trait Hook<T> {
     async fn post(&mut self) -> T;
 }
 #[derive(Debug, Clone)]
-pub struct HookRunner<H> {
-    hook: H,
+pub struct Driver<R> {
+    rb: R,
 }
-impl<H> HookRunner<H> {
-    pub fn new(hook: H) -> Self {
-        Self { hook }
+impl<R> Driver<R> {
+    pub fn new(rb: R) -> Self {
+        Self { rb }
     }
 }
 
-// run() -> Stream<Item = TestRes>
-// skip() -> Stream<Item = TestRes>
-// A Driver aggregates tests.
-// A Runner turns an iterator of tests into a stream of test reseults (running hooks if needed).
-//  but then how to run hooks before a batch of tests?
-//  so, A Run/Crank/Block implements Stream and Skip
-//  I kind of want everything to return a stream of TestRes, but I want to decide
-//  at each level whether that is from skip() or run()
-// A Stat takes a stream of test results and agregates them into some report.
+struct DummyRunner<I> {
+    inner: I,
+}
 #[async_trait]
-impl<Args, H> FnT<Args> for HookRunner<H>
+impl<'a, 'b, I, In> Runner<In, TestRes<'b>> for DummyRunner<I>
 where
-    Args: Send + 'static,
-    H: Hook<TestRes<'static>> + Unpin + Clone + Send + Sync,
-    // H: Hook<TestRes<'static>> + Unpin + Clone + Send + Sync,
+    I::Item: Test<In, TestRes<'a>>, //@wol this this this
+    I: Iterator,
+    // Out: Default,
+    I: Send,
+    In: Send,
+    In: 'static,
+{
+    async fn step(&mut self, mode: Mode, args: In) -> Option<TestRes<'b>> {
+        None
+    }
+}
+impl<I> ExactSize for DummyRunner<I> {
+    fn len(&self) -> usize { 1 }
+}
+impl<I> DummyRunner<I> {
+    pub fn new(inner: I) -> Self {
+        Self { inner }
+    }
+}
+
+// Driver should take a runner as part of args
+#[async_trait]
+impl<'a, Base, R> FnT<Base> for Driver<R>
+// impl<Base, H> FnT<Base> for Driver<HBuilder<H>>
+where
+    Base: Send + 'static,
+    // H: Hook<TestRes<'static>> + Clone + Send + Sync,
+    // R: RunnerBuilder<This<X> = HookRunner2<X, TestRes<'static>>> + Send + Sync,
+    // R: Send + Sync + RunnerBuilder<TestRes<'static>>,
+    R: Send + Sync + RBB<Out = TestRes<'a>>,
+    // R: Send + Sync + RBB<Out = Out>,
+    // Out: Default,
 {
     type Output = ();
-    async fn call<T>(&self, args: Args) -> FnOut<Self, Args>
+    async fn call<T>(&self, args: Base) -> FnOut<Self, Base>
     where
         Self: FnT<T>,
-        T: MapBounds<Args>,
+        T: MapBounds<Base>,
         ChildTypes<T>: MapStep<Self, T> + TList,
     {
-        let ctx = T::build(args).await;
+        // check5::<T, _, _>(self, args).await;
+        // let ctx = T::build(args).await;
+        // let tests = <T as TestSet<'static>>::tests();
         let tests = T::tests();
+        let tests = tests.iter();
+        let iter = DummyRunner::new(tests);
+        let mut runner = self.rb.new::<_, T>(iter).await;
+        null().await;
+        // let foo = runner.step(Mode::Skip, ctx).await;
 
-        let mut inner = BaseRunner::new(tests.iter());
-        let mut runner = HookRunner2 {
-            inner,
-            hook: self.hook.clone(),
-        };
-        let mut pass = 0;
-        let mut fail = 0;
-        let mut skip = 0;
-        while let Some(res) = runner.next(Mode::Run, ctx.clone()).await {
-            match res.status {
-                Status::Pass => pass += 1,
-                Status::Fail => fail += 1,
-                Status::Skip => skip += 1,
-            }
-        }
-        println!("tests passed : {}", pass);
-        println!("tests failed : {}", fail);
-        println!("tests skipped: {}", skip);
+        // Whatever runner I hold, I need to be able to turn it into a
+        // Runner<B> given a b. Or I just need a single RunnerBuilder
+        // that may not itself be a runner, but can build a runner<In>
+        // given a runner<In> (the inner runner)
 
-        let child_iter = MapT::new::<ChildTypes<T>>(self, ctx.clone());
-        let mut child_stream = stream::iter(child_iter);
-        while let Some(_) = child_stream.next().await {}
+        // Can the same Runner run tests that take different args?
+        // Give me an iterator over &dyn Test<In, Out>, and I'll give you an
+        // impl Runner<In, Out>. The only thing we really need to change is
+        // In.
+        // Want to store a Runner in the Driver, then extend that Runner
+        // with tests before running it. But this changes the type of the runner?
+        // let mut inner = BaseRunner::new(tests.iter());
+        // let new = tests.iter.chain(tests.iter());
+        // let mut runner = HookRunner2 {
+        //     inner: tests.iter().chain(tests.iter()),
+        //     hook: self.hook.clone(),
+        // };
+
+        // typecheck(runner);
+        // let runner = self.runner.build(iter);
+        // let len = runner.len();
+        // let mut pass = 0;
+        // let mut fail = 0;
+        // let mut skip = 0;
+        // let foo = runner.step(Mode::Skip, ctx.clone());
+        // let foo = <R as RunnerBuilder>::This::<std::slice::Iter<'_, &dyn Test<T, TestRes<'_>>>>::step(Mode::Skip, ctx.clone());
+        // while let Some(res) = runner.step(Mode::Run, ctx.clone()).await {
+        //     match res.status {
+        //         Status::Pass => pass += 1,
+        //         Status::Fail => fail += 1,
+        //         Status::Skip => skip += 1,
+        //     }
+        // }
+        // println!("tests passed : {}", pass);
+        // println!("tests failed : {}", fail);
+        // println!("tests skipped: {}", skip);
+
+        // self.call::<Head<ChildTypes<T>>>(ctx.clone());
+
+        // map::<ChildTypes<T>, _, _>(self, ctx).await;
+        // let mut child_iter = MapT::new::<ChildTypes<T>>(self, ctx);
+        // let mut child_stream = stream::iter(child_iter);
+        // while let Some(_) = child_stream.next().await {}
+        //@wol-here
+        // let _ = child_iter.next().unwrap().await;
     }
 }
 
-use crate::core_stream::{Runner, ExactSize, Mode, BaseRunner};
-struct HookRunner2<I, H> {
+struct HBuilder<'a, H> {
+    hook: H,
+    _tick: std::marker::PhantomData<&'a u8>,
+}
+#[async_trait]
+impl<'a, H> RBB for HBuilder<'a, H>
+where
+    H: Hook<TestRes<'a>> + Clone + Send + Sync,
+{
+    type Out = TestRes<'a>;
+    type R<I, In>
+    where
+        I: Runner<In, Self::Out> + ExactSize + Send,
+        In: Send + 'static,
+    = HookRunner2<I, H>;
+    async fn new<I, In>(&self, inner: I) -> Self::R<I, In>
+    where
+        I: Runner<In, Self::Out> + ExactSize + Send,
+        In: Send + 'static,
+    {
+        HookRunner2 {
+            inner,
+            hook: self.hook.clone(),
+        }
+    }
+}
+
+fn typecheck<T: Runner<In, Out>, In, Out>(runner: T) {}
+async fn checker<'a, I, In, H>(builder: HBuilder<'a, H>, inner: I)
+where
+    I: Runner<In, TestRes<'a>> + ExactSize + Send,
+    H: Hook<TestRes<'a>> + Clone + Send + Sync,
+    In: Send + 'static,
+{
+    let runner = builder.new(inner).await;
+    typecheck(runner);
+}
+fn check2<'a, RB, I, In>(rb: RB, inner: I)
+where
+    RB: RBB<Out = TestRes<'a>>,
+    I: Runner<In, TestRes<'a>> + ExactSize + Send,
+    In: Send + 'static,
+{
+    rb.new(inner);
+}
+use crate::core_stream::TestSet;
+fn check3<RB, T>(rb: RB)
+where
+    RB: RBB<Out = TestRes<'static>> + Send + Sync,
+    T: MapBounds<()>,
+    // TSet: TestSet<'static> + Send + Sync + 'static,
+{
+    let inner = T::tests().iter();
+    rb.new(inner);
+}
+use crate::types::{HeadFn, Head};
+async fn check4<RB, T, F>(rb: RB, f: &F)
+where
+    RB: RBB<Out = TestRes<'static>> + Send + Sync,
+    T: MapBounds<()>,
+    F: FnT<()> + FnT<T>,
+    ChildTypes<T>: TList + MapStep<F, T>,
+{
+    let t: T = T::build(()).await;
+    rb.new(T::tests().iter());
+    let mut child_iter = MapT::new::<ChildTypes<T>>(f, t);
+    child_iter.next().unwrap().await;
+}
+
+async fn check5<T, RB, Args>(f: &Driver<RB>, args: Args)
+where
+    RB: RBB<Out = TestRes<'static>> + Send + Sync,
+    T: MapBounds<Args>,
+    ChildTypes<T>: TList + MapStep<Driver<RB>, T>,
+{
+    let ctx: T = T::build(args).await;
+    let iter = T::tests().iter();
+    map::<ChildTypes<T>, _, _>(f, ctx).await;
+    let runner = f.rb.new(iter).await;
+}
+async fn null() {}
+
+async fn map<Lst, F, Args>(f: &F, args: Args)
+where
+    F: FnT<Args>,
+    Lst: TList + MapStep<F, Args>,
+{
+    let map = MapT::new::<Lst>(f, args);
+    let mut stream = stream::iter(map);
+    while let Some(_) = stream.next().await {}
+}
+
+use crate::core_stream::{Builder, Functor, RunnerBuilder, RBB};
+struct Foo<Out>(std::marker::PhantomData<Out>);
+impl<'a, I, H> RunnerBuilder<TestRes<'a>> for HookRunner2<I, H>
+where
+    H: Hook<TestRes<'a>> + Send,
+{
+    type This<A, B>
+    where
+        A: Runner<B, TestRes<'a>> + Send,
+    = HookRunner2<A, H>;
+    fn build<A, B>(&self, a: A) -> Self::This<A, B>
+    where
+        A: Runner<B, TestRes<'a>> + Send,
+    {
+        // type This<A, B> where A: Runner<B, TestRes<'a>> + ExactSize + Send, B: Send + 'static = HookRunner2<A, H>;
+        // fn build<A, B>(&self, a: A) -> Self::This<A, B> where A: Runner<B, TestRes<'a>> + ExactSize + Send, B: Send + 'static {
+        todo!()
+    }
+}
+// impl<'a, I, H> RunnerBuilder<TestRes<'a>> for HookRunner2<I, H>
+// where
+//     H: Hook<TestRes<'a>> + Clone + Send,
+// {
+//     type This<A>
+//     where
+//         A: Send + Runner<>,
+//     = HookRunner2<A, H>;
+//     fn build<A: Send>(&self, a: A) -> Self::This<A> {
+//         Self::This {
+//             inner: a,
+//             hook: self.hook.clone(),
+//         }
+//     }
+// }
+pub struct RB<H>(std::marker::PhantomData<H>);
+impl<H> Builder for RB<H> {
+    type This<I> = HookRunner2<I, H>;
+}
+impl<H> Functor for RB<H> {
+    // HookRunner<A, H> -> HookRunner<B, H>
+    fn map<A, B, F>(self, fa: Self::This<A>, f: F) -> Self::This<B>
+    where
+        F: Fn(A) -> B,
+    {
+        HookRunner2 {
+            inner: (f)(fa.inner),
+            hook: fa.hook,
+        }
+    }
+    fn map_const<A, B>(self, fa: Self::This<A>, b: B) -> Self::This<B> {
+        HookRunner2 {
+            inner: b,
+            hook: fa.hook,
+        }
+    }
+}
+
+use crate::core_stream::{BaseRunner, ExactSize, Mode, Runner};
+pub struct HookRunner2<I, H> {
     inner: I,
     hook: H,
 }
@@ -111,15 +313,15 @@ where
     H: Hook<TestRes<'a>> + Send,
     In: Send + 'static,
 {
-    async fn next(&mut self, mode: Mode, args: In) -> Option<TestRes<'a>> {
+    async fn step(&mut self, mode: Mode, args: In) -> Option<TestRes<'a>> {
         if self.inner.is_empty() {
-            return self.inner.next(mode, args).await;
+            return self.inner.step(mode, args).await;
         }
         let pre = self.hook.pre().await;
         if pre.status.is_fail() {
             return Some(pre);
         }
-        let test = self.inner.next(mode, args).await.unwrap();
+        let test = self.inner.step(mode, args).await.unwrap();
         let post = self.hook.post().await;
         if !test.status.is_fail() && post.status.is_fail() {
             Some(post)
