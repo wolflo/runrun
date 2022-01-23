@@ -43,7 +43,7 @@ where
     Out: Default,
 {
     // type Out = <<T as Iterator>::Item as Test<In>>::Out;
-        async fn step(&mut self, mode: Mode, args: In) -> Option<Out> {
+    async fn step(&mut self, mode: Mode, args: In) -> Option<Out> {
         match self.next() {
             Some(t) => match mode {
                 Mode::Run => Some(t.run(args).await),
@@ -66,6 +66,60 @@ where
 pub trait Runner<In, Out> {
     async fn step(&mut self, mode: Mode, args: In) -> Option<Out>;
 }
+// #[async_trait]
+// pub trait Run<Out> {
+//     type This<U>;
+//     async fn run<T, Args>(&mut self, mode: Mode, t: Self::This<T>, args: Args) -> Option<Out> where T: Run<Out>;
+//     // async fn run<T, Args>(&mut self, mode: Mode, t: T, args: Args) -> Option<Out> where T: Run<Out>;
+// }
+// Also want to be able to restrict the inner runner that a particular runner can take
+// What if run<T: Test, Args>() takes a test t, does whatever it needs, then passes t and args
+// to it's inner runner.
+// What happens to the "flattenability" here. e.g. a fuzzing
+// #[async_trait]
+// impl<Out> Run<Out> for Base {
+//     type This<T> =
+//     async fn run<T, Args>(&mut self, mode: Mode, t: T, args: Args) -> Option<Out> where T: Run<Out> {
+//         None
+//     }
+//     where Self::This<T>: Test<Args, Out>;
+// }
+// TODO: split into run and skip
+#[async_trait]
+pub trait Run<TRes>
+where
+    TRes: Default,
+{
+    type Out;
+
+    async fn run<T, Args>(&mut self, t: T, args: Args) -> Self::Out
+    where
+        T: Test<Args, TRes>,
+        Args: Send;
+}
+//@wol just skip the Test trait entirely and impl Run for e.g. TestCase
+#[derive(Debug, Clone)]
+pub struct Base;
+#[async_trait]
+impl<TRes> Run<TRes> for Base
+where
+    TRes: Default,
+{
+    type Out = TRes;
+    async fn run<T, Args>(&mut self, t: T, args: Args) -> Self::Out
+    where
+        T: Test<Args, TRes>,
+        Args: Send,
+    {
+        t.run(args).await
+    }
+}
+
+
+// #[async_trait]
+// pub trait Runner<Out> {
+//     async fn step<In, T>(&mut self, mode: Mode, args: Self::Args) -> Option<Out>;
+// }
 // An iterator where the type of the thing it returns is tied to the type of the args passed to next()
 // Every Runner wraps another Runner (with the innermost Runner being an iterator).
 // Given a new runner, make a new version of myself that wraps this new runner
@@ -82,12 +136,12 @@ pub trait Runner<In, Out> {
 // Given a set of tests (or an inner Runner), build a Runner
 #[async_trait]
 pub trait RunnerBuilder<IOut, Out> {
-    type R<I, In>: Runner<In, Out> + Send
+    type This<I, In>: Runner<In, Out> + Send
     where
         I: Runner<In, IOut> + ExactSize + Send,
         In: Send + 'static;
 
-    async fn new<I, In>(&self, inner: I) -> Self::R<I, In>
+    async fn build<I, In>(&self, inner: I) -> Self::This<I, In>
     where
         I: Runner<In, IOut> + ExactSize + Send,
         In: Send + 'static;
@@ -108,7 +162,9 @@ pub trait TestSet<'a> {
     fn tests() -> &'a [&'a dyn Test<Self, TestRes>];
 }
 #[async_trait]
-pub trait Test<In, Out>: Send + Sync where Out: Default
+pub trait Test<In, Out>: Send + Sync
+where
+    Out: Default,
 {
     async fn run(&self, args: In) -> Out;
     fn skip(&self) -> Out {
@@ -200,7 +256,10 @@ where
 {
     async fn run(&self, _args: In) -> TestRes {
         let status = if *self { Status::Pass } else { Status::Fail };
-        TestRes { status, trace: Box::new("") }
+        TestRes {
+            status,
+            trace: Box::new(""),
+        }
     }
 }
 #[async_trait]
@@ -285,6 +344,18 @@ where
         self.0.skip()
     }
 }
+
+#[async_trait]
+pub trait Wrap {
+    type This<A: Send>: Send;
+    async fn build<A: Send>(&self, inner: A) -> Self::This<A>;
+}
+// pub trait RB<IOut, Out> {
+//     type R<I>;
+//     fn build<Inner, In>(&self, inner: Inner) -> Self::R<Inner>
+//     where
+//         Inner: Runner<In, IOut>;
+// }
 
 // * -> *
 // pub trait Builder {

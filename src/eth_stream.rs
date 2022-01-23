@@ -11,17 +11,21 @@ use crate::{
     hooks_stream::{Hook, Driver},
     types::{ChildTypes, ChildTypesFn, MapStep, MapT, TList},
 };
-
+use crate::{hooks_stream::HR, core_stream::Base};
 pub async fn start_eth<'a, M, I, C, Args>(args: Args)
 where
     C: Ctx<Base = Args> + TestSet<'a> + ChildTypesFn + DevRpcCtx + Unpin + Clone + Send + 'static,
-    ChildTypes<C>: MapStep<Driver<DevRpcHook<C>>, C> + TList,
+    ChildTypes<C>: MapStep<Driver<HR<Base, DevRpcHook<C>>>, C> + TList,
     C::Client: Deref<Target = DevRpcMiddleware<I>> + Unpin + Send + Sync,
     I: Middleware + Clone + 'static,
     Args: Send + 'static,
 {
     let init_ctx = C::build(args).await;
     let hooks = DevRpcHook::new(init_ctx.clone());
+    let hooks = HR {
+        inner: Base,
+        hook: hooks
+    };
     let runner = Driver::new(hooks);
     let iter = MapT::new::<ChildTypes<C>>(&runner, init_ctx);
     let mut stream = stream::iter(iter);
@@ -57,18 +61,18 @@ where
 }
 
 #[async_trait]
-impl<'a, M, I, Ctx> Hook<TestRes<'a>> for DevRpcHook<Ctx>
+impl<M, I, Ctx> Hook<TestRes> for DevRpcHook<Ctx>
 where
     M: Deref<Target = DevRpcMiddleware<I>> + Send + Sync + Clone,
     I: Middleware + Clone + 'static,
     Ctx: DevRpcCtx<Client = M> + Clone,
 {
-    async fn pre(&mut self) -> TestRes<'a> {
+    async fn pre(&mut self) -> TestRes {
         self.snap_id = self.client.snapshot().await.unwrap();
         Default::default()
     }
 
-    async fn post(&mut self) -> TestRes<'a> {
+    async fn post(&mut self) -> TestRes {
         self.client.revert_to_snapshot(self.snap_id).await.unwrap();
         Default::default()
     }

@@ -77,7 +77,9 @@ where
     }
 }
 impl<I> ExactSize for DummyRunner<I> {
-    fn len(&self) -> usize { 1 }
+    fn len(&self) -> usize {
+        1
+    }
 }
 impl<I> DummyRunner<I> {
     pub fn new(inner: I) -> Self {
@@ -106,20 +108,18 @@ impl<I> DummyRunner<I> {
 
 fn typecheck2() {}
 
-
+use crate::core_stream::Wrap;
 // Driver should take a runner as part of args
 #[async_trait]
 impl<Base, R> FnT<Base> for Driver<R>
 // impl<Base, H> FnT<Base> for Driver<HBuilder<H>>
 where
     Base: Send + 'static,
-    // H: Hook<TestRes<'static>> + Clone + Send + Sync,
-    // R: RunnerBuilder<This<X> = HookRunner2<X, TestRes<'static>>> + Send + Sync,
-    // R: Send + Sync + RunnerBuilder<TestRes<'static>>,
-    // R: Send + Sync + for<'a> RBB<Out<'a> = TestRes<'a>>,
-    R: Send + Sync + RunnerBuilder<TestRes, TestRes>,
-    // R::Out<'_>: Default,
-    // R::Out: Default,
+    // R: Send + Sync + RunnerBuilder<TestRes, TestRes>,
+    // R: Send + Sync + Wrap,
+    // R::This<A>: Runner<A, TestRes>,
+    R: Send + Sync + Run<TestRes>,
+    R: Clone,
 {
     type Output = ();
     async fn call<T>(&self, args: Base) -> FnOut<Self, Base>
@@ -130,7 +130,6 @@ where
     {
         let ctx = T::build(args).await;
         let tests = T::tests().iter();
-        let iter = DummyRunner::new(tests);
         // By passing iter to new() we are saying that iter must impl
         // Runner<TestRes<'static>, T> (as specified on R bound above).
         // The compiler's complaint is that R (rb.new()) expects an iter
@@ -138,9 +137,13 @@ where
         // by the caller? But this lifetime is actually tied to the lifetime
         // of the iterator returned by T::tests(). This seems like a problem,
         // because
-        let mut runner = self.rb.new::<_, T>(iter).await;
-        runner.step(Mode::Run, ctx).await;
-        null().await;
+        // let mut runner = self.rb.build(tests).await;
+        // runner.step(Mode::Run, ctx).await;
+        // null().await;
+        let mut r = self.rb.clone();
+        for t in tests {
+            let res = r.run(t, ctx.clone()).await;
+        }
 
         // Whatever runner I hold, I need to be able to turn it into a
         // Runner<B> given a b. Or I just need a single RunnerBuilder
@@ -190,27 +193,40 @@ where
     }
 }
 
-struct HBuilder<'a, H> {
+struct HBuilder<H> {
     hook: H,
-    _tick: std::marker::PhantomData<&'a u8>,
 }
 // HookRunner2 is a Runner<In> only if it's inner I is a Runner<In, Out = H::Out> where H is it's inner hook
 #[async_trait]
-impl<'a, H> RunnerBuilder<TestRes, TestRes> for HBuilder<'a, H>
+impl<H> RunnerBuilder<TestRes, TestRes> for HBuilder<H>
 where
     H: Hook<TestRes> + Clone + Send + Sync,
 {
-    type R<I, In>
+    type This<I, In>
     where
         I: Runner<In, TestRes> + ExactSize + Send,
         In: Send + 'static,
     = HookRunner2<I, H>;
-    async fn new<I, In>(&self, inner: I) -> Self::R<I, In>
+    async fn build<I, In>(&self, inner: I) -> Self::This<I, In>
     where
         I: Runner<In, TestRes> + ExactSize + Send,
         In: Send + 'static,
     {
         HookRunner2 {
+            inner,
+            hook: self.hook.clone(),
+        }
+    }
+}
+#[async_trait]
+impl<I, H> Wrap for HookRunner2<I, H>
+where
+    H: Clone + Send + Sync,
+    I: Sync,
+{
+    type This<A: Send> = HookRunner2<A, H>;
+    async fn build<A: Send>(&self, inner: A) -> Self::This<A> {
+        Self::This::<A> {
             inner,
             hook: self.hook.clone(),
         }
@@ -235,7 +251,6 @@ where
 //     }
 // }
 
-
 async fn map<Lst, F, Args>(f: &F, args: Args)
 where
     F: FnT<Args>,
@@ -246,7 +261,7 @@ where
     while let Some(_) = stream.next().await {}
 }
 
-use crate::core_stream::{RunnerBuilder};
+use crate::core_stream::RunnerBuilder;
 
 use crate::core_stream::{ExactSize, Mode, Runner};
 pub struct HookRunner2<I, H> {
@@ -283,6 +298,40 @@ where
 {
     fn len(&self) -> usize {
         self.inner.len()
+    }
+}
+
+use crate::core_stream::{Base, Run};
+#[derive(Clone)]
+pub struct HR<I, H> {
+    pub inner: I,
+    pub hook: H,
+}
+#[async_trait]
+impl<I, H, TRes> Run<TRes> for HR<I, H>
+where
+    I: Run<TRes, Out = TestRes> + Send,
+    H: Hook<TestRes> + Send,
+    TRes: Default,
+{
+    type Out = TestRes;
+    async fn run<T, Args>(&mut self, t: T, args: Args) -> Self::Out
+    where
+        T: Test<Args, TRes>,
+        Args: Send,
+    {
+        let pre = self.hook.pre().await;
+        if pre.status.is_fail() {
+            // self.inner.skip(t, args);
+            return pre;
+        }
+        let test = self.inner.run(t, args).await;
+        let post = self.hook.post().await;
+        if !test.status.is_fail() && post.status.is_fail() {
+            post
+        } else {
+            test
+        }
     }
 }
 
