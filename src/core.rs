@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use futures::stream::Stream;
-use std::fmt::Debug;
+use std::{panic::AssertUnwindSafe, fmt::Debug};
+use futures::FutureExt;
 
 use crate::types::{AsyncFn, ChildTypesFn, FnT, MapT};
 
@@ -16,37 +17,49 @@ impl<T, Args> MapBounds<Args> for T where
 {
 }
 
-// TODO: split into run and skip
 #[async_trait]
-pub trait Run<TRes>
-where
-    TRes: Default,
-{
-    type Out;
+pub trait Run: Sync {
+    type Inner: Run + Send + Sync;
+    fn inner(&mut self) -> &mut Self::Inner;
 
-    async fn run<T, Args>(&mut self, t: T, args: Args) -> Self::Out
+    async fn run<T, Args>(&mut self, t: T, args: Args) -> TestRes
     where
-        T: Test<Args, TRes>,
-        Args: Send;
+        T: Test<Args>,
+        Args: Send,
+    {
+        self.inner().run(t, args).await
+    }
+    fn skip<T, Args>(&mut self, t: T) -> TestRes
+    where
+        T: Test<Args>,
+        Args: Send
+    {
+        self.inner().skip(t)
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct Base;
 #[async_trait]
-impl<TRes> Run<TRes> for Base
-where
-    TRes: Default,
-{
-    type Out = TRes;
-    async fn run<T, Args>(&mut self, t: T, args: Args) -> Self::Out
+impl Run for Base {
+    type Inner = Self;
+    fn inner(&mut self) -> &mut Self::Inner { self }
+
+    async fn run<T, Args>(&mut self, t: T, args: Args) -> TestRes
     where
-        T: Test<Args, TRes>,
+        T: Test<Args>,
         Args: Send,
     {
         t.run(args).await
     }
+    fn skip<T, Args>(&mut self, t: T) -> TestRes
+    where
+        T: Test<Args>,
+        Args: Send,
+    {
+        t.skip()
+    }
 }
-
 
 #[async_trait]
 pub trait Ctx {
@@ -54,15 +67,12 @@ pub trait Ctx {
     async fn build(base: Self::Base) -> Self;
 }
 pub trait TestSet<'a> {
-    fn tests() -> &'a [&'a dyn Test<Self, TestRes>];
+    fn tests() -> &'a [&'a dyn Test<Self>];
 }
 #[async_trait]
-pub trait Test<In, Out>: Send + Sync
-where
-    Out: Default,
-{
-    async fn run(&self, args: In) -> Out;
-    fn skip(&self) -> Out {
+pub trait Test<In>: Send + Sync {
+    async fn run(&self, args: In) -> TestRes;
+    fn skip(&self) -> TestRes {
         Default::default()
     }
 }
@@ -71,6 +81,7 @@ pub struct TestRes {
     pub status: Status,
     pub trace: Box<dyn Debug + Send + Sync>,
 }
+
 #[derive(Debug, Clone, Copy)]
 pub enum Status {
     Pass,
@@ -113,25 +124,38 @@ impl Default for TestRes {
 }
 
 #[derive(Clone)]
-pub struct TestCase<'a, In, Out> {
+pub struct TestCase<'a, X, Y> {
     pub name: &'static str,
-    pub test: &'a AsyncFn<'a, In, Out>,
+    pub test: &'a AsyncFn<'a, X, Y>,
 }
 #[async_trait]
-impl<'a, In, Out, Y> Test<In, Out> for TestCase<'_, In, Y>
+impl<'a, X, Y> Test<X> for TestCase<'_, X, Y>
 where
-    In: Send + Sync + 'static,
-    Y: Test<(), Out>, // could also pass args to result.run()
-    Out: Default,
+    X: Send + Sync + 'static,
+    Y: Test<()>, // could also pass args to result.run()
 {
-    async fn run(&self, args: In) -> Out {
+    async fn run(&self, args: X) -> TestRes {
         println!("{}", self.name);
-        (self.test)(args).await.run(()).await
+        self.test.run(args).await
+    }
+}
+#[async_trait]
+impl<X, Y> Test<X> for AsyncFn<'_, X, Y>
+where
+    X: Send,
+    Y: Test<()>,
+{
+    async fn run(&self, args: X) -> TestRes {
+        let res = AssertUnwindSafe(self(args)).catch_unwind().await;
+        match res {
+            Ok(t) => t.run(()).await,
+            _ => { println!("Test panic."); Default::default() }
+        }
     }
 }
 // () is a passing Test
 #[async_trait]
-impl<'a, In> Test<In, TestRes> for ()
+impl<'a, In> Test<In> for ()
 where
     In: Send + 'static,
 {
@@ -144,7 +168,7 @@ where
 }
 // true is a passing Test, false is a failing Test
 #[async_trait]
-impl<In> Test<In, TestRes> for bool
+impl<In> Test<In> for bool
 where
     In: Send + 'static,
 {
@@ -157,9 +181,9 @@ where
     }
 }
 #[async_trait]
-impl<'a, T, E, In> Test<In, TestRes> for Result<T, E>
+impl<'a, T, E, In> Test<In> for Result<T, E>
 where
-    T: Test<In, TestRes> + Send + Sync,
+    T: Test<In> + Send + Sync,
     E: Into<Box<dyn std::error::Error>> + Send + Sync + 'a,
     In: Send + Sync + 'static,
 {
@@ -183,64 +207,54 @@ where
     }
 }
 #[async_trait]
-impl<T, In, Out> Test<In, Out> for &'_ T
+impl<T, In> Test<In> for &'_ T
 where
-    T: Test<In, Out> + ?Sized + Send + Sync,
+    T: Test<In> + ?Sized + Send + Sync,
     In: Send + Sync + 'static,
-    Out: Default,
 {
-    async fn run(&self, args: In) -> Out {
+    async fn run(&self, args: In) -> TestRes {
         (**self).run(args).await
     }
-    fn skip(&self) -> Out {
+    fn skip(&self) -> TestRes {
         (**self).skip()
     }
 }
 #[async_trait]
-impl<T, In, Out> Test<In, Out> for &'_ mut T
+impl<T, In> Test<In> for &'_ mut T
 where
-    T: Test<In, Out> + ?Sized + Send + Sync,
+    T: Test<In> + ?Sized + Send + Sync,
     In: Send + Sync + 'static,
-    Out: Default,
 {
-    async fn run(&self, args: In) -> Out {
+    async fn run(&self, args: In) -> TestRes {
         (**self).run(args).await
     }
-    fn skip(&self) -> Out {
+    fn skip(&self) -> TestRes {
         (**self).skip()
     }
 }
 #[async_trait]
-impl<T, In, Out> Test<In, Out> for Box<T>
+impl<T, In> Test<In> for Box<T>
 where
-    T: Test<In, Out> + ?Sized + Send + Sync,
+    T: Test<In> + ?Sized + Send + Sync,
     In: Send + Sync + 'static,
-    Out: Default,
 {
-    async fn run(&self, args: In) -> Out {
+    async fn run(&self, args: In) -> TestRes {
         (**self).run(args).await
     }
-    fn skip(&self) -> Out {
+    fn skip(&self) -> TestRes {
         (**self).skip()
     }
 }
 #[async_trait]
-impl<T, In, Out> Test<In, Out> for std::panic::AssertUnwindSafe<T>
+impl<T, In> Test<In> for std::panic::AssertUnwindSafe<T>
 where
-    T: Test<In, Out> + Send + Sync,
+    T: Test<In> + Send + Sync,
     In: Send + Sync + 'static,
-    Out: Default,
 {
-    async fn run(&self, args: In) -> Out {
+    async fn run(&self, args: In) -> TestRes {
         self.0.run(args).await
     }
-    fn skip(&self) -> Out {
+    fn skip(&self) -> TestRes {
         self.0.skip()
     }
-}
-
-#[async_trait]
-pub trait Wrap {
-    type This<A: Send>: Send;
-    async fn build<A: Send>(&self, inner: A) -> Self::This<A>;
 }

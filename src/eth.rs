@@ -7,11 +7,11 @@ use futures::{stream, stream::StreamExt};
 use std::ops::Deref;
 
 use crate::{
-    core_stream::{Ctx, TestRes, TestSet},
-    hooks_stream::{Hook, Driver},
+    core::{Ctx, TestRes, TestSet},
+    hook::{Hook, Driver},
     types::{ChildTypes, ChildTypesFn, MapStep, MapT, TList},
 };
-use crate::{hooks_stream::HookRun, core_stream::Base};
+use crate::{hook::HookRun, core::Base};
 pub async fn start_eth<'a, M, I, C, Args>(args: Args)
 where
     C: Ctx<Base = Args> + TestSet<'a> + ChildTypesFn + DevRpcCtx + Unpin + Clone + Send + 'static,

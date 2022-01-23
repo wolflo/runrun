@@ -9,8 +9,8 @@ use pin_project::pin_project;
 use std::{marker::PhantomData, task::Poll};
 
 use crate::{
-    core_stream::{MapBounds, Status, Test, TestRes, Base, Run},
-    types::{ChildTypes, ExactSizeStream, FnOut, FnT, MapStep, MapT, TList},
+    core::{MapBounds, Status, Test, TestRes, Base, Run},
+    types::{ChildTypes, FnOut, FnT, MapStep, MapT, TList},
 };
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -52,7 +52,7 @@ impl<R> Driver<R> {
 impl<Base, R> FnT<Base> for Driver<R>
 where
     Base: Send + 'static,
-    R: Run<TestRes, Out = TestRes> + Send + Sync + Clone,
+    R: Run + Send + Sync + Clone,
 {
     type Output = ();
     async fn call<T>(&self, args: Base) -> FnOut<Self, Base>
@@ -109,21 +109,22 @@ impl<I, H> HookRun<I, H> {
     }
 }
 #[async_trait]
-impl<I, H, TRes> Run<TRes> for HookRun<I, H>
+impl<I, H> Run for HookRun<I, H>
 where
-    I: Run<TRes, Out = TestRes> + Send,
-    H: Hook<TestRes> + Send,
-    TRes: Default,
+    I: Run + Send,
+    H: Hook<TestRes> + Send + Sync,
 {
-    type Out = TestRes;
-    async fn run<T, Args>(&mut self, t: T, args: Args) -> Self::Out
+    type Inner = I;
+    fn inner(&mut self) -> &mut Self::Inner { &mut self.inner }
+
+    async fn run<T, Args>(&mut self, t: T, args: Args) -> TestRes
     where
-        T: Test<Args, TRes>,
+        T: Test<Args>,
         Args: Send,
     {
         let pre = self.hook.pre().await;
         if pre.status.is_fail() {
-            // self.inner.skip(t, args);
+            self.inner.skip(t);
             return pre;
         }
         let test = self.inner.run(t, args).await;

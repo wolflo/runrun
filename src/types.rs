@@ -12,15 +12,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use crate::core_stream::MapBounds;
-
-pub type Head<T> = <T as HeadFn>::Out;
-pub trait HeadFn {
-    type Out;
-}
-impl<H, T> HeadFn for TCons<H, T> {
-    type Out = H;
-}
+use crate::core::MapBounds;
 
 #[derive(Debug, Clone, Copy)]
 pub struct TNil;
@@ -148,12 +140,5 @@ where
 {
     fn step<'a>(_: &mut MapT<'a, F, Args>) -> Option<FnFut<'a, F, Args>> {
         None
-    }
-}
-
-pub trait ExactSizeStream: Stream {
-    fn len(&self) -> usize;
-    fn is_empty(&self) -> bool {
-        self.len() == 0
     }
 }
