@@ -9,11 +9,11 @@ use crate::types::{tmap, AsyncFn, ChildTypes, ChildTypesFn, FnOut, FnT, MapStep,
 // we would be able to map an arbitrary FnT, but we can only map FnT's that
 // share the same trait bounds.
 pub trait MapBounds<Args>:
-    Ctx<Base = Args> + TestSet<'static> + ChildTypesFn + Unpin + Clone + Send + Sync + 'static
+    Ctx<Base = Args> + TestSet<'static> + ChildTypesFn + Clone + Send + Sync + 'static
 {
 }
 impl<T, Args> MapBounds<Args> for T where
-    T: Ctx<Base = Args> + TestSet<'static> + ChildTypesFn + Unpin + Clone + Send + Sync + 'static
+    T: Ctx<Base = Args> + TestSet<'static> + ChildTypesFn + Clone + Send + Sync + 'static
 {
 }
 
@@ -21,11 +21,13 @@ pub async fn start<T, RB, Args>(runner_builder: RB, args: Args)
 where
     RB: Builder<T>,
     RB::Built: Runner + Send + Clone,
-    T: Ctx<Base = Args> + ChildTypesFn + Send + 'static,
+    T: Ctx<Base = Args> + ChildTypesFn + TestSet<'static> + Send + Sync + Clone + 'static,
     ChildTypes<T>: MapStep<Driver<RB::Built>, T> + TList,
 {
     let init_ctx = T::build(args).await;
     let runner = runner_builder.build(&init_ctx);
+    // run tests on init_ctx
+    run_ctx(runner.clone(), init_ctx.clone()).await;
     let driver = Driver::new(runner);
     tmap::<T, _, _>(&driver, init_ctx).await;
 }
@@ -50,6 +52,26 @@ impl<R> Driver<R> {
     }
 }
 
+pub async fn run_ctx<R, T>(mut runner: R, ctx: T) where T: Ctx + TestSet<'static> + Clone + Send + Sync + 'static, R: Runner + Send {
+    let tests = T::tests().iter();
+
+    let mut pass = 0;
+    let mut fail = 0;
+    let mut skip = 0;
+    for t in tests {
+        let res = runner.run(t, ctx.clone()).await;
+        match res.status {
+            Status::Pass => pass += 1,
+            Status::Fail => fail += 1,
+            Status::Skip => skip += 1,
+        }
+    }
+
+    println!("tests passed : {}", pass);
+    println!("tests failed : {}", fail);
+    println!("tests skipped: {}", skip);
+}
+
 #[async_trait]
 impl<Base, R> FnT<Base> for Driver<R>
 where
@@ -64,25 +86,12 @@ where
         ChildTypes<T>: MapStep<Self, T> + TList,
     {
         let ctx = T::build(args).await;
-        let tests = T::tests().iter();
         let mut runner = self.runner.clone();
 
-        let mut pass = 0;
-        let mut fail = 0;
-        let mut skip = 0;
-        for t in tests {
-            let res = runner.run(t, ctx.clone()).await;
-            match res.status {
-                Status::Pass => pass += 1,
-                Status::Fail => fail += 1,
-                Status::Skip => skip += 1,
-            }
-        }
+        // run tests on current ctx
+        run_ctx(runner, ctx.clone()).await;
 
-        println!("tests passed : {}", pass);
-        println!("tests failed : {}", fail);
-        println!("tests skipped: {}", skip);
-
+        // map self over child ctxs
         tmap::<T, _, _>(self, ctx).await;
     }
 }

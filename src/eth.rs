@@ -63,13 +63,11 @@ where
 {
     async fn pre(&mut self) -> TestRes {
         self.snap_id = self.client.snapshot().await.unwrap();
-        println!("pre hook dev rpc");
         Default::default()
     }
 
     async fn post(&mut self) -> TestRes {
         self.client.revert_to_snapshot(self.snap_id).await.unwrap();
-        println!("post hook dev rpc");
         Default::default()
     }
 }
