@@ -1,6 +1,6 @@
 use ethers::{prelude::LocalWallet, utils::Ganache};
 // use runrun::{core::start, eth::EthRunner, register_ctx};
-use runrun::{eth_stream::start_eth, register_ctx};
+use runrun::register_ctx;
 
 mod init;
 use init::{Ctx0, Inner};
@@ -23,13 +23,15 @@ register_ctx!(Ctx2);
 register_ctx!(Ctx3);
 register_ctx!(Ctx4);
 
+use runrun::core::Built;
+use runrun::eth::Eth;
+
 #[tokio::main]
 async fn main() {
     // Start a ganache node
     let node = Ganache::new().spawn();
     let accts: Vec<LocalWallet> = node.keys()[..5].iter().map(|x| x.clone().into()).collect();
 
-    // Run all tests, starting at Ctx0
-    start_eth::<Inner, _, Ctx0, _>((node.endpoint(), accts)).await;
-    // start::<EthRunner<Ctx0>, _, _>((node.endpoint(), accts)).await;
+    let builder = Eth::builder();
+    runrun::start::<Ctx0, _, _>(builder, (node.endpoint(), accts)).await;
 }

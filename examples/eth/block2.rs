@@ -1,7 +1,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
-use runrun::{core_stream::Ctx, run_ctx, run_test};
+use runrun::{core::Ctx, run_ctx, run_test};
 
 use crate::{
     init::{Client, Ctx0},

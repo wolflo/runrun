@@ -8,7 +8,7 @@ use ethers::{
 };
 use std::sync::Arc;
 
-use runrun::{core_stream::Ctx, run_ctx, run_test};
+use runrun::{core::Ctx, run_ctx, run_test};
 
 use crate::{
     init::{Client, Ctx0},
@@ -50,6 +50,7 @@ impl Ctx for Ctx1 {
 async fn test_minted(ctx: Ctx1) -> Result<()> {
     let paused = ctx.token.paused().call().await?;
     assert!(!paused);
+    panic!("");
     Ok(())
 }
 #[run_test]
@@ -61,7 +62,10 @@ async fn test_hooks_3(ctx: Ctx1) -> Result<()> {
 #[run_test]
 async fn test_hooks_2(ctx: Ctx1) -> Result<()> {
     let paused = ctx.token.paused().call().await?;
-    ctx.token.mint(ctx.mint_receiver, 1usize.into()).send().await?;
+    ctx.token
+        .mint(ctx.mint_receiver, 1usize.into())
+        .send()
+        .await?;
     Ok(())
 }
 #[run_test]

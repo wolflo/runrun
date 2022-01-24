@@ -6,8 +6,7 @@ use ethers::{
 use std::{convert::TryFrom, sync::Arc, time::Duration};
 
 use runrun::run_ctx;
-// use runrun::{core::Ctx, eth_stream::DevRpcCtx, ty::*, TList};
-use runrun::{core_stream::Ctx, eth_stream::DevRpcCtx, types::*, TList};
+use runrun::{core::Ctx, eth::DevRpcCtx, types::*, TList};
 
 use crate::utils::{make_factory, ERC20MinterPauser};
 
@@ -59,8 +58,8 @@ impl Ctx for Ctx0 {
 // Expose the client for generating DevRpcHooks (initial Ctx only)
 impl DevRpcCtx for Ctx0 {
     type Client = Arc<Client>;
-    fn client(self) -> Self::Client {
-        self.client
+    fn client(&self) -> Self::Client {
+        self.client.clone()
     }
 }
 

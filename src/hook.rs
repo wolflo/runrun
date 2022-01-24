@@ -5,7 +5,6 @@ use futures::{
     stream::{Stream, StreamExt},
     Future, FutureExt,
 };
-use pin_project::pin_project;
 use std::{marker::PhantomData, task::Poll};
 
 use crate::{

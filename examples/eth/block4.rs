@@ -5,7 +5,7 @@ use ethers::{
     types::{Address, U256},
 };
 
-use runrun::{core_stream::Ctx, run_ctx, run_test};
+use runrun::{core::Ctx, run_ctx, run_test};
 
 use crate::{block1::Ctx1, init::Client, utils::ERC20MinterPauser};
 
