@@ -9,38 +9,25 @@ use pin_project::pin_project;
 use std::{marker::PhantomData, task::Poll};
 
 use crate::{
-    core::{Base, Builder, MapBounds, Run, Status, Test, TestRes},
+    core::{BaseRunner, Built, Builder, MapBounds, Runner, Status, Test, TestRes},
     types::{tmap, ChildTypes, FnOut, FnT, MapStep, MapT, TList},
 };
 
-pub struct HookRunBuilder<IB, HB> {
+pub struct HookRunnerBuilder<IB, HB> {
     pub inner_builder: IB,
     pub hook_builder: HB,
 }
-impl<IB, HB, T> Builder<T> for HookRunBuilder<IB, HB>
+impl<IB, HB, T> Builder<T> for HookRunnerBuilder<IB, HB>
 where
     HB: Builder<T>,
     IB: Builder<T>,
 {
-    type This = HookRun<IB::This, HB::This>;
+    type This = HookRunner<IB::This, HB::This>;
     fn build(self, base: &T) -> Self::This {
         Self::This {
             inner: self.inner_builder.build(base),
             hook: self.hook_builder.build(base),
         }
-    }
-}
-
-pub struct BaseBuilder;
-impl Base {
-    pub fn builder() -> BaseBuilder {
-        BaseBuilder
-    }
-}
-impl<T> Builder<T> for BaseBuilder {
-    type This = Base;
-    fn build(self, base: &T) -> Self::This {
-        Base
     }
 }
 
@@ -71,19 +58,19 @@ pub trait Hook<T> {
 }
 
 #[derive(Clone)]
-pub struct HookRun<I, H> {
+pub struct HookRunner<I, H> {
     pub inner: I,
     pub hook: H,
 }
-impl<I, H> HookRun<I, H> {
+impl<I, H> HookRunner<I, H> {
     pub fn new(inner: I, hook: H) -> Self {
         Self { inner, hook }
     }
 }
 #[async_trait]
-impl<I, H> Run for HookRun<I, H>
+impl<I, H> Runner for HookRunner<I, H>
 where
-    I: Run + Send,
+    I: Runner + Send,
     H: Hook<TestRes> + Send + Sync,
 {
     type Inner = I;
@@ -107,6 +94,15 @@ where
             post
         } else {
             test
+        }
+    }
+}
+impl<I, H> Built for HookRunner<I, H> where I: Built, H: Built {
+    type Builder = HookRunnerBuilder<I::Builder, H::Builder>;
+    fn builder() -> Self::Builder {
+        Self::Builder {
+            inner_builder: I::builder(),
+            hook_builder: H::builder(),
         }
     }
 }

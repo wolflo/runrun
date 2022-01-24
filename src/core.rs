@@ -20,7 +20,7 @@ impl<T, Args> MapBounds<Args> for T where
 pub async fn start<T, RB, Args>(runner_builder: RB, args: Args)
 where
     RB: Builder<T>,
-    RB::This: Run + Send + Clone,
+    RB::This: Runner + Send + Clone,
     T: Ctx<Base = Args> + ChildTypesFn + Send + 'static,
     ChildTypes<T>: MapStep<Driver<RB::This>, T> + TList,
 {
@@ -53,7 +53,7 @@ impl<R> Driver<R> {
 impl<Base, R> FnT<Base> for Driver<R>
 where
     Base: Send + 'static,
-    R: Run + Send + Sync + Clone,
+    R: Runner + Send + Sync + Clone,
 {
     type Output = ();
     async fn call<T>(&self, args: Base) -> FnOut<Self, Base>
@@ -87,8 +87,8 @@ where
 }
 
 #[async_trait]
-pub trait Run: Sync {
-    type Inner: Run + Send + Sync;
+pub trait Runner: Sync {
+    type Inner: Runner + Send + Sync;
     fn inner(&mut self) -> &mut Self::Inner;
 
     async fn run<T, Args>(&mut self, t: T, args: Args) -> TestRes
@@ -108,9 +108,9 @@ pub trait Run: Sync {
 }
 
 #[derive(Debug, Clone)]
-pub struct Base;
+pub struct BaseRunner;
 #[async_trait]
-impl Run for Base {
+impl Runner for BaseRunner {
     type Inner = Self;
     fn inner(&mut self) -> &mut Self::Inner {
         self
@@ -129,6 +129,19 @@ impl Run for Base {
         Args: Send,
     {
         t.skip()
+    }
+}
+pub struct BaseRunnerBuilder;
+impl<T> Builder<T> for BaseRunnerBuilder {
+    type This = BaseRunner;
+    fn build(self, base: &T) -> Self::This {
+        BaseRunner
+    }
+}
+impl Built for BaseRunner {
+    type Builder = BaseRunnerBuilder;
+    fn builder() -> Self::Builder {
+        BaseRunnerBuilder
     }
 }
 
