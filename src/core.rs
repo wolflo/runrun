@@ -20,9 +20,9 @@ impl<T, Args> MapBounds<Args> for T where
 pub async fn start<T, RB, Args>(runner_builder: RB, args: Args)
 where
     RB: Builder<T>,
-    RB::This: Runner + Send + Clone,
+    RB::Built: Runner + Send + Clone,
     T: Ctx<Base = Args> + ChildTypesFn + Send + 'static,
-    ChildTypes<T>: MapStep<Driver<RB::This>, T> + TList,
+    ChildTypes<T>: MapStep<Driver<RB::Built>, T> + TList,
 {
     let init_ctx = T::build(args).await;
     let runner = runner_builder.build(&init_ctx);
@@ -30,9 +30,10 @@ where
     tmap::<T, _, _>(&driver, init_ctx).await;
 }
 
+// Bidirectional relationship between a builder and the object it builds.
 pub trait Builder<T> {
-    type This;
-    fn build(self, base: &T) -> Self::This;
+    type Built;
+    fn build(self, base: &T) -> Self::Built;
 }
 pub trait Built {
     type Builder;
@@ -131,17 +132,17 @@ impl Runner for BaseRunner {
         t.skip()
     }
 }
-pub struct BaseRunnerBuilder;
-impl<T> Builder<T> for BaseRunnerBuilder {
-    type This = BaseRunner;
-    fn build(self, base: &T) -> Self::This {
-        BaseRunner
+// BaseRunner is its own builder
+impl<T> Builder<T> for BaseRunner {
+    type Built = BaseRunner;
+    fn build(self, base: &T) -> Self::Built {
+        Self::Built {}
     }
 }
 impl Built for BaseRunner {
-    type Builder = BaseRunnerBuilder;
+    type Builder = BaseRunner;
     fn builder() -> Self::Builder {
-        BaseRunnerBuilder
+        Self::Builder {}
     }
 }
 

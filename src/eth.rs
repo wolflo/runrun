@@ -8,10 +8,12 @@ use std::{marker::PhantomData, ops::Deref};
 
 use crate::{core::BaseRunner, hook::HookRunner};
 use crate::{
-    core::{Builder, Ctx, Driver, TestRes, TestSet},
+    core::{Builder, Built, Ctx, Driver, TestRes, TestSet},
     hook::Hook,
     types::{tmap, ChildTypes, ChildTypesFn, MapStep, MapT, TList},
 };
+
+pub type Eth<M> = HookRunner<BaseRunner, DevRpcHook<M>>;
 
 // Should be implemented by the starting state to allow the runner to be built in start()
 pub trait DevRpcCtx {
@@ -25,11 +27,7 @@ pub struct DevRpcHook<M> {
     client: M,
 }
 
-
-use crate::core::Built;
-
-pub type Eth<M> = HookRunner<BaseRunner, DevRpcHook<M>>;
-
+pub struct DevRpcBuilder<M>(PhantomData<M>);
 impl<M> Built for DevRpcHook<M> {
     type Builder = DevRpcBuilder<M>;
     fn builder() -> Self::Builder {
@@ -37,7 +35,6 @@ impl<M> Built for DevRpcHook<M> {
     }
 }
 
-pub struct DevRpcBuilder<M>(PhantomData<M>);
 impl<M> DevRpcBuilder<M> {
     pub fn new() -> Self {
         Self(PhantomData)
@@ -49,9 +46,9 @@ where
     I: Middleware + Clone + 'static,
     Ctx: DevRpcCtx<Client = M> + Clone,
 {
-    type This = DevRpcHook<M>;
-    fn build(self, base: &Ctx) -> Self::This {
-        Self::This {
+    type Built = DevRpcHook<M>;
+    fn build(self, base: &Ctx) -> Self::Built {
+        Self::Built {
             snap_id: 0usize.into(),
             client: base.client(),
         }

@@ -9,47 +9,9 @@ use pin_project::pin_project;
 use std::{marker::PhantomData, task::Poll};
 
 use crate::{
-    core::{BaseRunner, Built, Builder, MapBounds, Runner, Status, Test, TestRes},
+    core::{BaseRunner, Builder, Built, MapBounds, Runner, Status, Test, TestRes},
     types::{tmap, ChildTypes, FnOut, FnT, MapStep, MapT, TList},
 };
-
-pub struct HookRunnerBuilder<IB, HB> {
-    pub inner_builder: IB,
-    pub hook_builder: HB,
-}
-impl<IB, HB, T> Builder<T> for HookRunnerBuilder<IB, HB>
-where
-    HB: Builder<T>,
-    IB: Builder<T>,
-{
-    type This = HookRunner<IB::This, HB::This>;
-    fn build(self, base: &T) -> Self::This {
-        Self::This {
-            inner: self.inner_builder.build(base),
-            hook: self.hook_builder.build(base),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-pub struct NoHook;
-#[async_trait]
-impl<T> Hook<T> for NoHook
-where
-    T: Default + Send,
-{
-    async fn pre(&mut self) -> T {
-        Default::default()
-    }
-    async fn post(&mut self) -> T {
-        Default::default()
-    }
-}
-impl NoHook {
-    pub fn new() -> Self {
-        Self
-    }
-}
 
 #[async_trait]
 pub trait Hook<T> {
@@ -59,8 +21,8 @@ pub trait Hook<T> {
 
 #[derive(Clone)]
 pub struct HookRunner<I, H> {
-    pub inner: I,
-    pub hook: H,
+    inner: I,
+    hook: H,
 }
 impl<I, H> HookRunner<I, H> {
     pub fn new(inner: I, hook: H) -> Self {
@@ -97,12 +59,66 @@ where
         }
     }
 }
-impl<I, H> Built for HookRunner<I, H> where I: Built, H: Built {
+
+pub struct HookRunnerBuilder<IB, HB> {
+    pub inner_builder: IB,
+    pub hook_builder: HB,
+}
+impl<IB, HB, T> Builder<T> for HookRunnerBuilder<IB, HB>
+where
+    HB: Builder<T>,
+    IB: Builder<T>,
+{
+    type Built = HookRunner<IB::Built, HB::Built>;
+    fn build(self, base: &T) -> Self::Built {
+        Self::Built::new(
+            self.inner_builder.build(base),
+            self.hook_builder.build(base),
+        )
+    }
+}
+impl<I, H> Built for HookRunner<I, H>
+where
+    I: Built,
+    H: Built,
+{
     type Builder = HookRunnerBuilder<I::Builder, H::Builder>;
     fn builder() -> Self::Builder {
         Self::Builder {
             inner_builder: I::builder(),
             hook_builder: H::builder(),
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoHook;
+#[async_trait]
+impl<T> Hook<T> for NoHook
+where
+    T: Default + Send,
+{
+    async fn pre(&mut self) -> T {
+        Default::default()
+    }
+    async fn post(&mut self) -> T {
+        Default::default()
+    }
+}
+impl NoHook {
+    pub fn new() -> Self {
+        Self
+    }
+}
+impl<T> Builder<T> for NoHook {
+    type Built = NoHook;
+    fn build(self, _: &T) -> Self::Built {
+        Self::Built {}
+    }
+}
+impl Built for NoHook {
+    type Builder = NoHook;
+    fn builder() -> Self::Builder {
+        Self::Builder {}
     }
 }
