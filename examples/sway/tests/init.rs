@@ -7,6 +7,8 @@ use fuel_tx::Salt;
 use anyhow::Result;
 use std::sync::Arc;
 
+use fuel_core::service::{Config, FuelService};
+
 use crate::utils::TestContract;
 
 use runrun::{run_ctx, run_test, core::Ctx, types::*, TList};
@@ -20,9 +22,10 @@ pub struct Ctx0 {
 #[run_ctx]
 #[async_trait]
 impl Ctx for Ctx0 {
-    type Base = std::net::SocketAddr;
-    async fn build(node_addr: Self::Base) -> Self {
-        let client = FuelClient::from(node_addr);
+    type Base = ();
+    async fn build(_base: Self::Base) -> Self {
+        let server = FuelService::new_node(Config::local_node()).await.unwrap();
+        let client = FuelClient::from(server.bound_address);
 
         // Build the contract
         let rng = &mut StdRng::seed_from_u64(2322u64);

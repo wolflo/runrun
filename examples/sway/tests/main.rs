@@ -22,10 +22,5 @@ register_ctx!(Ctx1);
 
 #[tokio::main]
 async fn main() {
-    let rng = &mut StdRng::seed_from_u64(2322u64);
-
-    let server = FuelService::new_node(Config::local_node()).await.unwrap();
-
-    let builder = BaseRunner::builder();
-    runrun::start::<Ctx0, _, _>(builder, server.bound_address).await;
+    runrun::start::<Ctx0, _, _>(BaseRunner::builder(), ()).await;
 }
