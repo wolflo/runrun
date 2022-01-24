@@ -9,9 +9,40 @@ use pin_project::pin_project;
 use std::{marker::PhantomData, task::Poll};
 
 use crate::{
-    core::{MapBounds, Status, Test, TestRes, Base, Run},
-    types::{ChildTypes, FnOut, FnT, MapStep, MapT, TList},
+    core::{Base, Builder, MapBounds, Run, Status, Test, TestRes},
+    types::{tmap, ChildTypes, FnOut, FnT, MapStep, MapT, TList},
 };
+
+pub struct HookRunBuilder<IB, HB> {
+    pub inner_builder: IB,
+    pub hook_builder: HB,
+}
+impl<IB, HB, T> Builder<T> for HookRunBuilder<IB, HB>
+where
+    HB: Builder<T>,
+    IB: Builder<T>,
+{
+    type This = HookRun<IB::This, HB::This>;
+    fn build(self, base: &T) -> Self::This {
+        Self::This {
+            inner: self.inner_builder.build(base),
+            hook: self.hook_builder.build(base),
+        }
+    }
+}
+
+pub struct BaseBuilder;
+impl Base {
+    pub fn builder() -> BaseBuilder {
+        BaseBuilder
+    }
+}
+impl<T> Builder<T> for BaseBuilder {
+    type This = Base;
+    fn build(self, base: &T) -> Self::This {
+        Base
+    }
+}
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NoHook;
@@ -38,62 +69,6 @@ pub trait Hook<T> {
     async fn pre(&mut self) -> T;
     async fn post(&mut self) -> T;
 }
-#[derive(Debug, Clone)]
-pub struct Driver<R> {
-    runner: R,
-}
-impl<R> Driver<R> {
-    pub fn new(runner: R) -> Self {
-        Self { runner }
-    }
-}
-
-#[async_trait]
-impl<Base, R> FnT<Base> for Driver<R>
-where
-    Base: Send + 'static,
-    R: Run + Send + Sync + Clone,
-{
-    type Output = ();
-    async fn call<T>(&self, args: Base) -> FnOut<Self, Base>
-    where
-        Self: FnT<T>,
-        T: MapBounds<Base>,
-        ChildTypes<T>: MapStep<Self, T> + TList,
-    {
-        let ctx = T::build(args).await;
-        let tests = T::tests().iter();
-        let mut runner = self.runner.clone();
-
-        let mut pass = 0;
-        let mut fail = 0;
-        let mut skip = 0;
-        for t in tests {
-            let res = runner.run(t, ctx.clone()).await;
-            match res.status {
-                Status::Pass => pass += 1,
-                Status::Fail => fail += 1,
-                Status::Skip => skip += 1,
-            }
-        }
-
-        println!("tests passed : {}", pass);
-        println!("tests failed : {}", fail);
-        println!("tests skipped: {}", skip);
-
-        map::<ChildTypes<T>, _, _>(self, ctx).await;
-    }
-}
-
-async fn map<Lst, F, Args>(f: &F, args: Args)
-where
-    F: FnT<Args>,
-    Lst: TList + MapStep<F, Args>,
-{
-    let map = MapT::new::<Lst>(f, args);
-    let mut stream = stream::iter(map);
-    while let Some(_) = stream.next().await {}
-}
 
 #[derive(Clone)]
 pub struct HookRun<I, H> {
@@ -102,10 +77,7 @@ pub struct HookRun<I, H> {
 }
 impl<I, H> HookRun<I, H> {
     pub fn new(inner: I, hook: H) -> Self {
-        Self {
-            inner,
-            hook,
-        }
+        Self { inner, hook }
     }
 }
 #[async_trait]
@@ -115,7 +87,9 @@ where
     H: Hook<TestRes> + Send + Sync,
 {
     type Inner = I;
-    fn inner(&mut self) -> &mut Self::Inner { &mut self.inner }
+    fn inner(&mut self) -> &mut Self::Inner {
+        &mut self.inner
+    }
 
     async fn run<T, Args>(&mut self, t: T, args: Args) -> TestRes
     where

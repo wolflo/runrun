@@ -1,13 +1,13 @@
 use async_trait::async_trait;
 use futures::stream::Stream;
-use std::{panic::AssertUnwindSafe, fmt::Debug};
 use futures::FutureExt;
+use std::{fmt::Debug, panic::AssertUnwindSafe};
 
-use crate::types::{AsyncFn, ChildTypesFn, FnT, MapT};
+use crate::types::{tmap, AsyncFn, ChildTypes, ChildTypesFn, FnOut, FnT, MapStep, MapT, TList};
 
 // Used by the MapT type to bound the types that can be mapped over. Ideally
-// we would be able to map an arbitrary FnT, but unfortunately we can only map
-// FnT's that share the same trait bounds.
+// we would be able to map an arbitrary FnT, but we can only map FnT's that
+// share the same trait bounds.
 pub trait MapBounds<Args>:
     Ctx<Base = Args> + TestSet<'static> + ChildTypesFn + Unpin + Clone + Send + Sync + 'static
 {
@@ -15,6 +15,75 @@ pub trait MapBounds<Args>:
 impl<T, Args> MapBounds<Args> for T where
     T: Ctx<Base = Args> + TestSet<'static> + ChildTypesFn + Unpin + Clone + Send + Sync + 'static
 {
+}
+
+pub async fn start<T, RB, Args>(runner_builder: RB, args: Args)
+where
+    RB: Builder<T>,
+    RB::This: Run + Send + Clone,
+    T: Ctx<Base = Args> + ChildTypesFn + Send + 'static,
+    ChildTypes<T>: MapStep<Driver<RB::This>, T> + TList,
+{
+    let init_ctx = T::build(args).await;
+    let runner = runner_builder.build(&init_ctx);
+    let driver = Driver::new(runner);
+    tmap::<T, _, _>(&driver, init_ctx).await;
+}
+
+pub trait Builder<T> {
+    type This;
+    fn build(self, base: &T) -> Self::This;
+}
+pub trait Built {
+    type Builder;
+    fn builder() -> Self::Builder;
+}
+
+#[derive(Debug, Clone)]
+pub struct Driver<R> {
+    runner: R,
+}
+impl<R> Driver<R> {
+    pub fn new(runner: R) -> Self {
+        Self { runner }
+    }
+}
+
+#[async_trait]
+impl<Base, R> FnT<Base> for Driver<R>
+where
+    Base: Send + 'static,
+    R: Run + Send + Sync + Clone,
+{
+    type Output = ();
+    async fn call<T>(&self, args: Base) -> FnOut<Self, Base>
+    where
+        Self: FnT<T>,
+        T: MapBounds<Base>,
+        ChildTypes<T>: MapStep<Self, T> + TList,
+    {
+        let ctx = T::build(args).await;
+        let tests = T::tests().iter();
+        let mut runner = self.runner.clone();
+
+        let mut pass = 0;
+        let mut fail = 0;
+        let mut skip = 0;
+        for t in tests {
+            let res = runner.run(t, ctx.clone()).await;
+            match res.status {
+                Status::Pass => pass += 1,
+                Status::Fail => fail += 1,
+                Status::Skip => skip += 1,
+            }
+        }
+
+        println!("tests passed : {}", pass);
+        println!("tests failed : {}", fail);
+        println!("tests skipped: {}", skip);
+
+        tmap::<T, _, _>(self, ctx).await;
+    }
 }
 
 #[async_trait]
@@ -32,7 +101,7 @@ pub trait Run: Sync {
     fn skip<T, Args>(&mut self, t: T) -> TestRes
     where
         T: Test<Args>,
-        Args: Send
+        Args: Send,
     {
         self.inner().skip(t)
     }
@@ -43,7 +112,9 @@ pub struct Base;
 #[async_trait]
 impl Run for Base {
     type Inner = Self;
-    fn inner(&mut self) -> &mut Self::Inner { self }
+    fn inner(&mut self) -> &mut Self::Inner {
+        self
+    }
 
     async fn run<T, Args>(&mut self, t: T, args: Args) -> TestRes
     where
@@ -149,7 +220,10 @@ where
         let res = AssertUnwindSafe(self(args)).catch_unwind().await;
         match res {
             Ok(t) => t.run(()).await,
-            _ => { println!("Test panic."); Default::default() }
+            _ => {
+                println!("Test panic.");
+                Default::default()
+            }
         }
     }
 }

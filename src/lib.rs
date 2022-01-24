@@ -1,9 +1,11 @@
 #![allow(dead_code)]
 
-pub mod types;
 pub mod core;
-pub mod macros;
-pub mod hook;
+pub use crate::core::start;
+
 pub mod eth;
+pub mod hook;
+pub mod macros;
+pub mod types;
 
 pub use runrun_derive::*;

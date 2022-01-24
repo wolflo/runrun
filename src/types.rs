@@ -14,6 +14,29 @@ use std::{
 
 use crate::core::MapBounds;
 
+pub async fn tmap<T, F, Args>(f: &F, args: Args)
+where
+    T: ChildTypesFn,
+    F: FnT<Args>,
+    ChildTypes<T>: TList + MapStep<F, Args>,
+{
+    let mut map = MapT::new::<ChildTypes<T>>(f, args);
+    while let Some(fut) = map.next() {
+        fut.await;
+    }
+}
+
+pub async fn map<Lst, F, Args>(f: &F, args: Args)
+where
+    F: FnT<Args>,
+    Lst: TList + MapStep<F, Args>,
+{
+    let mut map = MapT::new::<Lst>(f, args);
+    while let Some(fut) = map.next() {
+        fut.await;
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct TNil;
 #[derive(Debug, Clone, Copy)]
@@ -48,7 +71,7 @@ pub type FnOut<F, Args> = <F as FnT<Args>>::Output;
 pub type FnFut<'fut, F, Args> = BoxFuture<'fut, FnOut<F, Args>>;
 
 // FnT is similar to the FnMut trait, but async and with a type parameter to call<T>().
-// Sadly, I don't think it's possible to map an arbitrary function over a TList
+// I don't think it's possible to map an arbitrary function over a TList
 // without GATs and specialization, so we need to include all of the bounds for
 // runners directly on the FnT trait. See https://willcrichton.net/notes/gats-are-hofs/
 #[async_trait]
@@ -63,7 +86,7 @@ pub trait FnT<Args> {
 }
 
 // Given a TList and a function that maps each type in the TList to values of
-// the same type, we can map the function over the TList to generate an iterator.
+// a common type, we can map the function over the TList to generate an iterator.
 // Akin to std::iter::Map, except the function to be mapped is an FnT, meaning
 // it takes the next type in the TList as a type parameter to call<T>()
 pub struct MapT<'a, F, Args>
