@@ -1,6 +1,5 @@
 use ethers::{prelude::LocalWallet, utils::Ganache};
-// use runrun::{core::start, eth::EthRunner, register_ctx};
-use runrun::register_ctx;
+use runrun::{core::Built, eth::Eth, register_ctx};
 
 mod init;
 use init::{Ctx0, Inner};
@@ -22,9 +21,6 @@ register_ctx!(Ctx1, [Ctx3, Ctx4]);
 register_ctx!(Ctx2);
 register_ctx!(Ctx3);
 register_ctx!(Ctx4);
-
-use runrun::core::Built;
-use runrun::eth::Eth;
 
 #[tokio::main]
 async fn main() {

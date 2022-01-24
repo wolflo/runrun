@@ -1,0 +1,24 @@
+[package]
+name = "sway"
+version = "0.1.0"
+authors = ["Ohm"]
+edition = "2021"
+license = "Apache-2.0"
+
+[dependencies]
+linkme = "0.2.7"
+async-trait = "0.1.52"
+fuels-abigen-macro = "0.2.1"
+fuels-core = "0.2.1"
+fuels-rs = "0.2.1"
+fuel-gql-client = { version = "0.2", default-features = false }
+fuel-core = { version = "0.2", default-features = false }
+fuel-tx = "0.2"
+rand = "0.8"
+tokio = { version = "1.15.0", features = ["rt", "macros"] }
+runrun = { path = "../../"}
+anyhow = "1.0.51"
+
+[[bin]]
+name = "integration_tests"
+path = "tests/main.rs"

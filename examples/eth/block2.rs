@@ -25,7 +25,6 @@ impl Ctx for Ctx2 {
 
 #[run_test]
 async fn test_pause(ctx: Ctx2) -> Result<()> {
-    println!("test_pause");
     let paused = ctx.token.paused().call().await?;
     assert!(paused);
     Ok(())

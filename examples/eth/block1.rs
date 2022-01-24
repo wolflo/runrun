@@ -50,7 +50,6 @@ impl Ctx for Ctx1 {
 async fn test_minted(ctx: Ctx1) -> Result<()> {
     let paused = ctx.token.paused().call().await?;
     assert!(!paused);
-    panic!("");
     Ok(())
 }
 #[run_test]

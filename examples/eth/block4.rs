@@ -23,6 +23,5 @@ impl Ctx for Ctx4 {
 
 #[run_test]
 async fn test_foo(ctx: Ctx4) -> Result<()> {
-    println!("test_foo");
     Ok(())
 }

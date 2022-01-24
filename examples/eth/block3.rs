@@ -43,7 +43,6 @@ impl Ctx for Ctx3 {
 
 #[run_test]
 async fn test_transfer(ctx: Ctx3) -> Result<()> {
-    println!("test_transfer");
     // let paused = ctx.token.paused().call().await?;
     // assert!(!paused);
     Ok(())

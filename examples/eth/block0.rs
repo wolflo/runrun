@@ -7,14 +7,12 @@ use runrun::run_test;
 
 #[run_test]
 async fn test_not_paused(ctx: Ctx0) -> Result<()> {
-    println!("test_not_paused");
     let paused = ctx.token.paused().call().await?;
     assert!(!paused);
     Ok(())
 }
 #[run_test]
 async fn test_supply(ctx: Ctx0) -> Result<()> {
-    println!("test_supply");
     let supply = ctx.token.total_supply().call().await?;
     assert_eq!(supply, 0.into());
     Ok(())

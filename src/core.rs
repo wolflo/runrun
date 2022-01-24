@@ -52,7 +52,11 @@ impl<R> Driver<R> {
     }
 }
 
-pub async fn run_ctx<R, T>(mut runner: R, ctx: T) where T: Ctx + TestSet<'static> + Clone + Send + Sync + 'static, R: Runner + Send {
+pub async fn run_ctx<R, T>(mut runner: R, ctx: T)
+where
+    T: Ctx + TestSet<'static> + Clone + Send + Sync + 'static,
+    R: Runner + Send,
+{
     let tests = T::tests().iter();
 
     let mut pass = 0;
