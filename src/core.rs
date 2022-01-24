@@ -1,9 +1,8 @@
 use async_trait::async_trait;
-use futures::stream::Stream;
 use futures::FutureExt;
 use std::{fmt::Debug, panic::AssertUnwindSafe};
 
-use crate::types::{tmap, AsyncFn, ChildTypes, ChildTypesFn, FnOut, FnT, MapStep, MapT, TList};
+use crate::types::{tmap, AsyncFn, ChildTypes, ChildTypesFn, FnOut, FnT, MapStep, TList};
 
 // Used by the MapT type to bound the types that can be mapped over. Ideally
 // we would be able to map an arbitrary FnT, but we can only map FnT's that
@@ -90,10 +89,9 @@ where
         ChildTypes<T>: MapStep<Self, T> + TList,
     {
         let ctx = T::build(args).await;
-        let mut runner = self.runner.clone();
 
         // run tests on current ctx
-        run_ctx(runner, ctx.clone()).await;
+        run_ctx(self.runner.clone(), ctx.clone()).await;
 
         // map self over child ctxs
         tmap::<T, _, _>(self, ctx).await;
@@ -148,7 +146,7 @@ impl Runner for BaseRunner {
 // BaseRunner is its own builder
 impl<T> Builder<T> for BaseRunner {
     type Built = BaseRunner;
-    fn build(self, base: &T) -> Self::Built {
+    fn build(self, _base: &T) -> Self::Built {
         Self::Built {}
     }
 }
@@ -291,7 +289,7 @@ where
     async fn run(&self, args: In) -> TestRes {
         match self {
             Ok(r) => r.run(args).await,
-            Err(e) => TestRes {
+            Err(_e) => TestRes {
                 status: Status::Fail,
                 trace: Box::new("Test of Err value. We should provide real traces for these."), // trace: (*e).clone().into(),
             },
@@ -300,7 +298,7 @@ where
     fn skip(&self) -> TestRes {
         match self {
             Ok(r) => r.skip(),
-            Err(e) => TestRes {
+            Err(_e) => TestRes {
                 status: Status::Fail,
                 trace: Box::new("Skip of Err value. We should provide real traces for these."), // trace: (*e).clone().into(),
             },

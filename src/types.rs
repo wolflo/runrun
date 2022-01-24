@@ -1,16 +1,6 @@
 use async_trait::async_trait;
-use futures::{
-    future::BoxFuture,
-    ready,
-    stream::{Stream, StreamExt},
-    Future, FutureExt,
-};
-use std::{
-    marker::PhantomData,
-    pin::Pin,
-    sync::Arc,
-    task::{Context, Poll},
-};
+use futures::future::BoxFuture;
+use std::marker::PhantomData;
 
 use crate::core::MapBounds;
 

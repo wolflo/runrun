@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 pub mod core;
 pub use crate::core::start;
 
