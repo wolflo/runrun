@@ -1,5 +1,3 @@
-#![feature(log_syntax)]
-
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use proc_macro::TokenStream;
 use quote::{quote, format_ident};
