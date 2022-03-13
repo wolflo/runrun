@@ -38,6 +38,11 @@ impl<M> DevRpcBuilder<M> {
         Self(PhantomData)
     }
 }
+impl<M> Default for DevRpcBuilder<M> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 impl<M, I, Ctx> Builder<Ctx> for DevRpcBuilder<M>
 where
     M: Deref<Target = DevRpcMiddleware<I>> + Send + Sync + Clone,

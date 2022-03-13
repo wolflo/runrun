@@ -1,13 +1,14 @@
-use proc_macro2::{Span, TokenStream as TokenStream2};
 use proc_macro::TokenStream;
-use quote::{quote, format_ident};
+use quote::{format_ident, quote};
 use syn::parse_macro_input;
 
 #[proc_macro_attribute]
 pub fn run_test(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as syn::ItemFn);
 
-    if input.sig.asyncness.is_none() { panic!("Non async test fn."); }
+    if input.sig.asyncness.is_none() {
+        panic!("Non async test fn.");
+    }
 
     let state_on = match input.sig.inputs.first().unwrap() {
         syn::FnArg::Typed(pat) => match &*pat.ty {

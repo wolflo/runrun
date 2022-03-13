@@ -10,8 +10,8 @@ where
     F: FnT<Args>,
     ChildTypes<T>: TList + MapStep<F, Args>,
 {
-    let mut map = MapT::new::<ChildTypes<T>>(f, args);
-    while let Some(fut) = map.next() {
+    let map = MapT::new::<ChildTypes<T>>(f, args);
+    for fut in map {
         fut.await;
     }
 }
@@ -21,8 +21,8 @@ where
     F: FnT<Args>,
     Lst: TList + MapStep<F, Args>,
 {
-    let mut map = MapT::new::<Lst>(f, args);
-    while let Some(fut) = map.next() {
+    let map = MapT::new::<Lst>(f, args);
+    for fut in map {
         fut.await;
     }
 }
