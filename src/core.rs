@@ -16,6 +16,9 @@ impl<T, Args> MapBounds<Args> for T where
 {
 }
 
+/// Utility function which takes a runner builder and the args to pass to the
+/// builder. After building the runner, the first Ctx is built and run, then
+/// child Ctx runs are kicked off.
 pub async fn start<T, RB, Args>(runner_builder: RB, args: Args)
 where
     RB: Builder<T>,
@@ -32,10 +35,12 @@ where
 }
 
 // Bidirectional relationship between a builder and the object it builds.
+/// Trait for a standard Builder pattern.
 pub trait Builder<T> {
     type Built;
     fn build(self, base: &T) -> Self::Built;
 }
+/// Establishes an inverse relationship for finding a type's Builder.
 pub trait Built {
     type Builder;
     fn builder() -> Self::Builder;
@@ -51,6 +56,9 @@ impl<R> Driver<R> {
     }
 }
 
+/// Utility function for running the tests on a single Ctx given a test runner
+/// and the Ctx. Does some very basic aggregation and prints the number of tests
+/// passed, failed, and skipped to stdout.
 pub async fn run_ctx<R, T>(mut runner: R, ctx: T)
 where
     T: Ctx + TestSet<'static> + Clone + Send + Sync + 'static,
@@ -157,14 +165,17 @@ impl Built for BaseRunner {
     }
 }
 
+/// A Ctx is any type that can be built from its Base.
 #[async_trait]
 pub trait Ctx {
     type Base;
     async fn build(base: Self::Base) -> Self;
 }
+/// A type that implements TestSet is able to produce a list of Tests on itself.
 pub trait TestSet<'a> {
     fn tests() -> &'a [&'a dyn Test<Self>];
 }
+/// A Test is anything that can produce a `TestRes` given the required Args.
 #[async_trait]
 pub trait Test<In>: Send + Sync {
     async fn run(&self, args: In) -> TestRes;
@@ -172,12 +183,15 @@ pub trait Test<In>: Send + Sync {
         Default::default()
     }
 }
+/// A TestRes is the output of all tests, consisting of a Status and a trace that
+/// can be debugged.
 #[derive(Debug)]
 pub struct TestRes {
     pub status: Status,
     pub trace: Box<dyn Debug + Send + Sync>,
 }
 
+/// Indicates the status of a Test.
 #[derive(Debug, Clone, Copy)]
 pub enum Status {
     Pass,
