@@ -27,8 +27,10 @@ where
     }
 }
 
+/// Indicates the end of a [`trait@TList`].
 #[derive(Debug, Clone, Copy)]
 pub struct TNil;
+/// The continuation of a [`trait@TList`].
 #[derive(Debug, Clone, Copy)]
 pub struct TCons<H: ?Sized, T: ?Sized>(PhantomData<H>, PhantomData<T>);
 pub trait TList {
@@ -45,27 +47,39 @@ impl TList for TNil {
     const LEN: usize = 0;
 }
 
-// pub type BoxFuture<'fut, Y> = Pin<Box<dyn Future<Output = Y> + Send + 'fut>>;
+/// An async function from `X -> Y`.
 pub type AsyncFn<'fut, X, Y> = dyn Fn(X) -> BoxFuture<'fut, Y> + Send + Sync;
 
-// A mapping from type -> TList of descendant types. Specifically, this is
-// used to define the child Ctxs that can be built from each Ctx.
+/// Type alias for [`ChildTypesFn`].
 pub type ChildTypes<T> = <T as ChildTypesFn>::Out;
+
+/// Maps a type to a [`trait@TList`] of descendant types.
+///
+/// Specifically, this is used to define the child Ctxs that can be built from each test [`Ctx`].
+///
+/// [`Ctx`]: crate::core::Ctx
 pub trait ChildTypesFn {
     type Out;
 }
 
-// FnOut is the output type of an FnT
+/// The output type of an [`FnT`].
 pub type FnOut<F, Args> = <F as FnT<Args>>::Output;
-// FnFut is the output type of an FnT, wrapped in a pinned future
+/// The output type of an FnT, wrapped in a pinned future.
 pub type FnFut<'fut, F, Args> = BoxFuture<'fut, FnOut<F, Args>>;
 
-// FnT is similar to the FnMut trait, but async and with a type parameter to call<T>().
-// I don't think it's possible to map an arbitrary function over a TList
-// without GATs and specialization, so we need to include all of the bounds for
-// runners directly on the FnT trait. See https://willcrichton.net/notes/gats-are-hofs/
+/// Analogous to [FnMut], but async and with a type parameter to `call<T>()`.
+///
+/// Maps `Args` to [`Self::Output`], parameterized by the type `T`.
+///
+/// The bounds on `T` must be the same for all runners, because it is not possible
+/// to map an arbitrary function over a [`trait@TList`] without GATs and specialization
+/// (see Will Crighton's [exploration] of this approach).
+///
+/// [FnMut]: https://doc.rust-lang.org/std/ops/trait.FnMut.html
+/// [exploration]: https://willcrichton.net/notes/gats-are-hofs/
 #[async_trait]
 pub trait FnT<Args> {
+    /// The return type of the function.
     type Output;
     // Returns Self::Output, but FnOut is needed to disambiguate
     async fn call<T>(&self, args: Args) -> FnOut<Self, Args>
